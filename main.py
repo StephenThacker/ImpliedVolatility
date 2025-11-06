@@ -7,6 +7,9 @@ import plotly.graph_objects as go
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
+from massive import RESTClient
+from dotenv import load_dotenv
+import os
 
 class Node:
     def __init__(self, node_stock_price):
@@ -26,7 +29,7 @@ class Node:
 
 class binomial_tree:
 
-    def __init__(self, strike_price, number_of_layers, initial_stock_price, initial_sigma, interest_rate, time_to_expiration, stock_dividend):
+    def __init__(self, strike_price, number_of_layers, initial_stock_price, initial_sigma, interest_rate, time_to_expiration, stock_dividend,call_or_put):
         self.strike_price = strike_price
         self.number_of_layers = number_of_layers
         self.root = Node(initial_stock_price)
@@ -36,6 +39,7 @@ class binomial_tree:
         self.delta_t = None
         self.dividend = stock_dividend
         self.node_list = []
+        self.call_or_put = call_or_put
         self.define_time_segment()
         self.final_option_value = self.create_tree_structure()
         #print(self.final_option_value)
@@ -97,7 +101,6 @@ class binomial_tree:
                     current_node.node_stock_price = np.mean(prices)
                 else:
                     current_node.node_stock_price = 0.0  # Fallback for no parents
-                
        
         return
     
@@ -114,15 +117,24 @@ class binomial_tree:
         #assigns values of options for the last layer of the tree
         last_layer_index = self.number_of_layers - 1
         for node in self.node_list[last_layer_index]:
-            difference = node.node_stock_price - self.strike_price
-            node.option_value = np.maximum(difference,0)
+            if self.call_or_put == "call":
+                difference = node.node_stock_price - self.strike_price
+                node.option_value = np.maximum(difference,0)
+            elif self.call_or_put == "put":
+                difference = self.strike_price - node.node_stock_price
+                node.option_value = np.maximum(difference, 0)
 
         count = last_layer_index - 1
         while count >= 0:
             for node in self.node_list[count]:
                 up_node = node.up.option_value
                 down_node = node.down.option_value
-                node.option_value = self.assign_node_a_value(up_node, down_node)
+                if self.call_or_put == "call":
+                    exercise_value = node.node_stock_price - self.strike_price
+                elif self.call_or_put == "put":
+                    exercise_value = self.strike_price - node.node_stock_price
+                continuation_value = self.assign_node_a_value(up_node,down_node)
+                node.option_value = max(continuation_value, exercise_value)
             count = count - 1
 
         return self.node_list[0][0].option_value
@@ -149,11 +161,12 @@ class binomial_tree:
 
 class options_chain:
     
-    def __init__(self, ticker, method, steps):
+    def __init__(self, ticker, method, steps, call_or_put):
         self.ticker = ticker
         self.options_chains_dict = {}
         self.method = method
         self.steps = steps
+        self.call_or_put = call_or_put
         self.fetch_options_data(self.ticker)
 
     def vega(self, stock_price, time_to_expiration, cont_div_yield, d_1):
@@ -162,6 +175,10 @@ class options_chain:
 
     def black_scholes_call_option(self, stock_price, contin_div_yield, time_to_expiration,d_1, d_2, strike_price , risk_free_rate):
         price = stock_price*np.exp(-contin_div_yield*time_to_expiration)*norm.cdf(d_1) - strike_price*np.exp(-risk_free_rate*time_to_expiration)*norm.cdf(d_2)
+        return price
+    
+    def black_scholes_put_option(self, stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate):
+        price = strike_price*np.exp(-1*risk_free_rate*time_to_expiration)*norm.cdf(-1*d_2) - stock_price*np.exp(-1*contin_div_yield*time_to_expiration)*norm.cdf(-1*d_1)
         return price
 
     def d_1(self, strike_price, stock_price, risk_free_rate, cont_div_yield, sigma, time_to_expiration):
@@ -172,17 +189,18 @@ class options_chain:
         d2 = d_1 - sigma*np.sqrt(time_to_expiration)
         return d2
     
-    def newton_raphson_method_black_scholes(self, epsilon,stock_price, option_price,risk_free_rate, contin_div_yield, time_to_expiration, strike_price):
+    def newton_raphson_method_black_scholes(self, epsilon,stock_price, option_price,risk_free_rate, contin_div_yield, time_to_expiration, strike_price, bs_price_func):
         sigma = 0.8
         black_scholes_cost = 1
         market_cost = 0
         max_iter = 400
         count = 0
+        bs_price_func = bs_price_func
         while (np.abs(black_scholes_cost - market_cost) > epsilon) and count< max_iter:
 
             d_1 = self.d_1(strike_price, stock_price, risk_free_rate,contin_div_yield,sigma,time_to_expiration)
             d_2 = self.d_2(d_1, time_to_expiration, sigma)
-            black_scholes_cost = self.black_scholes_call_option(stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate)
+            black_scholes_cost = bs_price_func(stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate)
             market_cost = option_price
             vega = self.vega(stock_price, time_to_expiration, contin_div_yield, d_1)
 
@@ -212,6 +230,10 @@ class options_chain:
     
     def calc_implied_volatility(self,steps):
         if self.method == 'Black Scholes':
+            if self.call_or_put == "call":
+                bs_price_func = self.black_scholes_call_option
+            if self.call_or_put == "put":
+                bs_price_func = self.black_scholes_put_option
             for key in self.options_chains_dict.keys():
                 date_fraction = self.dates_to_expiration_fraction(key)
                 self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
@@ -219,7 +241,8 @@ class options_chain:
                                                                                                                             self.risk_free,\
                                                                                                                                 self.dividend_yield,\
                                                                                                                                     date_fraction,\
-                                                                                                                                        self.options_chains_dict[key]['strike'])
+                                                                                                                                        self.options_chains_dict[key]['strike'],\
+                                                                                                                                            bs_price_func)
                 self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
 
         if self.method == "BinTree Continuous Deriv":
@@ -228,7 +251,7 @@ class options_chain:
                     dates_to_expiration = self.dates_to_expiration_days(key)
                     self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
                     self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.fsolve_wrapper_binom)(0.6,\
-                                                                                                            self.options_chains_dict[key]['strike'],30,\
+                                                                                                            self.options_chains_dict[key]['strike'],self.steps,\
                                                                                                                 self.last_stock_price,\
                                                                                                                     self.risk_free,dates_to_expiration,\
                                                                                                                         self.dividend_yield,\
@@ -243,12 +266,13 @@ class options_chain:
         calc_imp_vol = fsolve(self.binomial_tree_objective_function, x0 = init_imp_vol_guess, args=args)
         print(calc_imp_vol)
 
-        return calc_imp_vol
+        return calc_imp_vol[0]
     
     def binomial_tree_objective_function(self, implied_vol, strike_price,number_of_layers, initial_stock_price, interest_rate,time_to_expiration,stock_div,last_price):
         bin_tree = binomial_tree(strike_price=strike_price,number_of_layers=number_of_layers,\
                                  initial_stock_price=initial_stock_price,initial_sigma=implied_vol,\
-                                    interest_rate=interest_rate,time_to_expiration=time_to_expiration,stock_dividend=stock_div)
+                                    interest_rate=interest_rate,time_to_expiration=time_to_expiration,stock_dividend=stock_div,\
+                                        call_or_put=self.call_or_put)
         
         return bin_tree.final_option_value - last_price
 
@@ -257,8 +281,11 @@ class options_chain:
         self.ticker = yf.Ticker(ticker)
         expiration_dates = self.ticker.options
         self.info = self.ticker.info
-        exp = expiration_dates[2]
-        self.options_chains_dict = {exp : self.ticker.option_chain(exp).calls for exp in expiration_dates}
+        if self.call_or_put == "call":
+            self.options_chains_dict = {exp : self.ticker.option_chain(exp).calls for exp in expiration_dates}
+        if self.call_or_put =="put":
+            self.options_chains_dict = {exp : self.ticker.option_chain(exp).puts for exp in expiration_dates}
+
         for exp, df in self.options_chains_dict.items():
             if 'bid' in df.columns and 'ask' in df.columns:
                 df['midpoint'] = (df['bid'] + df['ask']) / 2
@@ -300,12 +327,14 @@ class options_chain:
             days_to_exp = self.num_dates_to_expir(exp_date)
             if days_to_exp > max_days_to_exp or days_to_exp < 0:
                 continue
-
+            #purge negative implied vol, excessively high implied vol, deep OTM or ITM options by strike,
             valid_mask = (~df['calcImpliedVol'].isna()) & \
                         (df['calcImpliedVol'] > 0) & \
                         (df['calcImpliedVol'] <= 2.0) & \
-                        (df['strike'] >= lower_strike) & (df['strike'] <= upper_strike)
-            
+                        (df['strike'] >= lower_strike) &\
+                              (df['strike'] <= upper_strike) &\
+                              (df['bid']>0) & (df['ask'] >0) &\
+                              (df['volume']>0)            
 
             strikes = df.loc[valid_mask, 'strike'].values
             maturity = days_to_exp
@@ -321,6 +350,8 @@ class options_chain:
         strikes_all = np.array(strikes_all)
         maturities_all = np.array(maturities_all)
         implied_vols_all = np.array(implied_vols_all)
+
+        
 
         if len(strikes_all) == 0:
             print("No data points available for plotting after filtering.")
@@ -359,13 +390,44 @@ class options_chain:
 
         fig.show()
 
+def testing_polygon_api(ticker,client):
+    now = dt.datetime.utcnow()
+    thirty_min_ago = now - dt.timedelta(minutes=30)
+
+    from_date = thirty_min_ago.strftime("%Y-%m-%d")
+    to_date = now.strftime("%Y-%m-%d")
+
+    '''aggs = client.list_aggs(
+    ticker=ticker,
+    multiplier=1,          # 1-minute bars
+    timespan="minute",     # aggregate by minute
+    from_=from_date,
+    to=to_date,
+    adjusted=True,
+    limit=10)'''               # get up to 50 bars)
+
+    for contract in client.list_options_contracts("AAPL"):
+        print(contract.ticker)
+    
+    return
+
 
 def main():
-    options = options_chain("NVDA", "BinTree Continuous Deriv", 15)
-    options_scholes = options_chain("NVDA", "Black Scholes",None)
+    #load_dotenv()
+    #api_key0 = os.getenv("API_KEY")
+    #client = RESTClient(api_key = api_key0)
+    #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
 
-    options.plot_imp_vol_surface()
-    options_scholes.plot_imp_vol_surface()
+    #testing_polygon_api("AAPL",client)
+    call_bin_options = options_chain("NVDA", "BinTree Continuous Deriv", 30, "call")
+    call_put_options = options_chain("NVDA","BinTree Continuous Deriv", 30, "put" )
+    call_options_scholes = options_chain("BBWI", "Black Scholes",None,"call")
+    put_options_scholes = options_chain("BBWI", "Black Scholes", None, "put")
+
+    call_bin_options.plot_imp_vol_surface()
+    call_put_options.plot_imp_vol_surface()
+    call_options_scholes.plot_imp_vol_surface()
+    put_options_scholes.plot_imp_vol_surface()
 
 if __name__ == "__main__":
     main()
