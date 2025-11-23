@@ -2,14 +2,16 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
-import datetime as dt
+from scipy.optimize import brentq
 import plotly.graph_objects as go
+import datetime as dt
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
 from massive import RESTClient
 from dotenv import load_dotenv
 import os
+import time
 
 class Node:
     def __init__(self, node_stock_price):
@@ -27,12 +29,12 @@ class Node:
         #The touple gives the coordinates of the node, the string gives the direction of the branch that the prior node is emitting. ("i.e., up, or down")
         self.backwards_nodes = []
 
-class binomial_tree:
+class binomial_tree_prototype:
 
     def __init__(self, strike_price, number_of_layers, initial_stock_price, initial_sigma, interest_rate, time_to_expiration, stock_dividend,call_or_put):
         self.strike_price = strike_price
         self.number_of_layers = number_of_layers
-        self.root = Node(initial_stock_price)
+        self.initial_stock_price = initial_stock_price
         self.sigma = initial_sigma
         self.time_to_expiration = time_to_expiration
         self.interest_rate = interest_rate
@@ -40,26 +42,26 @@ class binomial_tree:
         self.dividend = stock_dividend
         self.node_list = []
         self.call_or_put = call_or_put
-        self.define_time_segment()
-        self.final_option_value = self.create_tree_structure()
-        #print(self.final_option_value)
-
-    def calculate_probability(self):
-        try:
-            self.probability = (np.exp((self.interest_rate-self.dividend) * self.delta_t) - self.d) / (self.u - self.d)
-        except ZeroDivisionError:
-            raise ValueError("Division by zero in probability calculation (u == d).")
-        return
-    
-    def define_time_segment(self):
         self.time_to_expiration = self.time_to_expiration/365
         try:
             self.delta_t = self.time_to_expiration / (self.number_of_layers -1)
         except ZeroDivisionError:
             raise ValueError
-        
-        self.u = np.exp(self.sigma * np.sqrt(self.delta_t))
-        self.d = np.exp(-self.sigma * np.sqrt(self.delta_t))
+        #self.define_time_segment()
+        #self.final_option_value = self.create_tree_structure()
+        #print(self.final_option_value)
+
+    def calculate_probability(self):
+        try:
+            return (np.exp((self.interest_rate-self.dividend) * self.delta_t) - self.d) / (self.u - self.d)
+        except ZeroDivisionError:
+            raise ValueError("Division by zero in probability calculation (u == d).")
+        return
+    
+    def define_time_segment(self,sigma):
+       
+        self.u = np.exp(sigma * np.sqrt(self.delta_t))
+        self.d = np.exp(-1*sigma * np.sqrt(self.delta_t))
         return self.delta_t
     
     def create_tree_nodes(self):
@@ -111,8 +113,7 @@ class binomial_tree:
         self.calculate_all_node_stock_values()
         self.calculate_probability()
         return self.determine_option_value()
-
-    
+   
     def determine_option_value(self):
         #assigns values of options for the last layer of the tree
         last_layer_index = self.number_of_layers - 1
@@ -141,7 +142,7 @@ class binomial_tree:
         
     
     def assign_node_a_value(self, node_value_up, node_value_down):
-        node_value = (np.exp(-1*(self.interest_rate- self.dividend)*self.delta_t)*(self.probability*node_value_up + (1 -self.probability)*node_value_down))
+        node_value = (np.exp(-1*(self.interest_rate)*self.delta_t)*(self.probability*node_value_up + (1 -self.probability)*node_value_down))
         return node_value      
     
     def create_recombining_tree_branches(self):
@@ -157,15 +158,64 @@ class binomial_tree:
         return
    
    
+class binomial_tree_vectorized(binomial_tree_prototype):
+    def __init__(self, strike_price, number_of_layers, initial_stock_price, initial_sigma, interest_rate, time_to_expiration, stock_dividend,call_or_put):
+        super().__init__(strike_price, number_of_layers, initial_stock_price, initial_sigma, interest_rate, time_to_expiration, stock_dividend,call_or_put)
+
+
    
+    #builds out the tree
+    #Uses 2d numpy array to create pricing array
+    def pricing_forward_pass(self,sigma, strike):
+        call_or_put = self.call_or_put
+        delta_t = self.define_time_segment(sigma)
+        down_factor = self.d
+        up_factor = self.u
+        number_of_layers = self.number_of_layers
+        prob = self.calculate_probability()
+        risk_free = self.interest_rate
+        discount = np.exp(-1*risk_free*delta_t)
+        discount_up = discount*prob
+        discount_down = discount*(1-prob)
+
+
+        price_array = np.zeros((number_of_layers,number_of_layers))
+        price_array[0,0] = self.initial_stock_price
+        for i in range(1,number_of_layers):
+            price_array[i,0] = price_array[i-1,0]*down_factor
+            price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
+
+
+        options_array  = np.zeros((number_of_layers,number_of_layers))
+        if self.call_or_put == "call":
+            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
+        if self.call_or_put == "put":
+            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
+
+        for i in range(self.number_of_layers -2, -1,-1):
+            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == "call" else np.maximum(strike - price_array[i,0:i+1],0)
+            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
+            '''for j in range(i,-1,-1):
+                continuation = discount*(prob*options_array[i+1,j+1] + (1-prob)*options_array[i+1,j])
+                intrinsic = np.maximum(price_array[i,j] - strike, 0) if call_or_put == "call" else np.maximum(strike - price_array[i,j], 0)
+                if intrinsic > continuation:
+                    options_array[i,j] = intrinsic  # Exercise early
+                else:
+                    options_array[i,j] = continuation''' 
+        return options_array[0,0]
+    
+    def vectorization_of_forward_pass(self,sigma, strike):
+        return self.pricing_forward_pass(sigma, strike )
 
 class options_chain:
     
-    def __init__(self, ticker, method, steps, call_or_put):
+    def __init__(self, ticker, method,number_of_layers, steps, call_or_put):
         self.ticker = ticker
         self.options_chains_dict = {}
         self.method = method
         self.steps = steps
+        self.number_of_layers = number_of_layers
         self.call_or_put = call_or_put
         self.fetch_options_data(self.ticker)
 
@@ -228,7 +278,7 @@ class options_chain:
 
         return days_to_expiration
     
-    def calc_implied_volatility(self,steps):
+    def calc_implied_volatility(self,number_of_layers):
         if self.method == 'Black Scholes':
             if self.call_or_put == "call":
                 bs_price_func = self.black_scholes_call_option
@@ -245,31 +295,68 @@ class options_chain:
                                                                                                                                             bs_price_func)
                 self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
 
+        start_time = time.perf_counter()
         if self.method == "BinTree Continuous Deriv":
                 count = 0
                 for key in self.options_chains_dict.keys():
                     dates_to_expiration = self.dates_to_expiration_days(key)
                     self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
-                    self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.fsolve_wrapper_binom)(0.6,\
-                                                                                                            self.options_chains_dict[key]['strike'],self.steps,\
+                    self.tree = binomial_tree_vectorized(self.options_chains_dict[key]['strike'],\
+                                             self.number_of_layers,self.last_stock_price,\
+                                                0.6, self.risk_free, dates_to_expiration,\
+                                                    self.dividend_yield,\
+                                                        self.call_or_put)
+                    self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.vectorized_brentq_wrapper)(0.01,2, self.options_chains_dict[key]['strike'],\
+                                                                                                                  self.options_chains_dict[key]['midpoint'])
+                    '''self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.fsolve_wrapper_binom)(0.6,\
+                                                                                                            self.options_chains_dict[key]['strike'],number_of_layers,\
                                                                                                                 self.last_stock_price,\
                                                                                                                     self.risk_free,dates_to_expiration,\
                                                                                                                         self.dividend_yield,\
                                                                                                                             self.options_chains_dict[key]['midpoint'])
                     count = count +1
-                    if count > steps:
-                        break
+                    if count > self.steps:
+                        break'''  
+        end_time = time.perf_counter()
+        print("final time", end_time - start_time)      
         return
+    
+    def vectorized_wrapper_binom(self,init_imp_vol_guess, strk_pr, midpoint):
+        args = (strk_pr,midpoint)
+        start = time.perf_counter()
+        calc_imp_vol = fsolve(self.vectorized_objective_function, x0 = init_imp_vol_guess, args=args)
+        end = time.perf_counter()
+        print("vectorized fsolve", end - start)
+        return calc_imp_vol[0]
+    
+    def vectorized_brentq_wrapper(self,sigma_low,sigma_high,strike_price,midpoint, xtol=1e-8, rtol=1e-8, maxiter=100):
+        def brentq_objective(sigma):
+            return self.tree.vectorization_of_forward_pass(sigma,strike_price) - midpoint
+
+        try:
+            start = time.perf_counter()
+            result = brentq(brentq_objective, sigma_low, sigma_high, xtol=1e-8, rtol=1e-8, maxiter=100)
+            stop = time.perf_counter()
+            print("time brentq",stop-start)
+            return result
+        except ValueError:
+            return np.nan
+
+    
+    def vectorized_objective_function(self,init_imp_vol_guess, strk_pr, midpoint):
+        return self.tree.vectorization_of_forward_pass(init_imp_vol_guess, strk_pr) - midpoint
+
     
     def fsolve_wrapper_binom(self, init_imp_vol_guess, strk_pr,number_of_layers, init_stock_pr,intrs_rat,tim_to_expr,stock_div,last_price):
         args = (strk_pr,number_of_layers,init_stock_pr,intrs_rat,tim_to_expr,stock_div,last_price)
+        start = time.perf_counter()
         calc_imp_vol = fsolve(self.binomial_tree_objective_function, x0 = init_imp_vol_guess, args=args)
-        print(calc_imp_vol)
+        print("slow binom",time.perf_counter() - start)
 
         return calc_imp_vol[0]
     
     def binomial_tree_objective_function(self, implied_vol, strike_price,number_of_layers, initial_stock_price, interest_rate,time_to_expiration,stock_div,last_price):
-        bin_tree = binomial_tree(strike_price=strike_price,number_of_layers=number_of_layers,\
+        bin_tree = binomial_tree_prototype(strike_price=strike_price,number_of_layers=number_of_layers,\
                                  initial_stock_price=initial_stock_price,initial_sigma=implied_vol,\
                                     interest_rate=interest_rate,time_to_expiration=time_to_expiration,stock_dividend=stock_div,\
                                         call_or_put=self.call_or_put)
@@ -289,33 +376,21 @@ class options_chain:
         for exp, df in self.options_chains_dict.items():
             if 'bid' in df.columns and 'ask' in df.columns:
                 df['midpoint'] = (df['bid'] + df['ask']) / 2
-        self.last_stock_price = self.info.get('regularMarketPrice') or ticker.history(period="1d")['Close'][0]
+        self.last_stock_price = self.ticker.history(period="1d")['Close'].iloc[-1]
         self.risk_free = yf.Ticker("^IRX").history(period="1d")['Close'][-1]/100
         if yf.Ticker(ticker).info.get('dividendYield') != None:
             self.dividend_yield = yf.Ticker(ticker).info.get('dividendYield')/100
         else:
             self.dividend_yield = 0
 
-        self.calc_implied_volatility(self.steps)
-
-
-    
-    def plot_imp_vol_curve(self):
-        x = np.linspace(-5,5, 100)
-        y = np.linspace(-5,5,100)
-        X,Y = np.meshgrid(x,y)
+        self.calc_implied_volatility(self.number_of_layers)
 
 
     def plot_imp_vol_surface(self):
-        import plotly.graph_objects as go
-        from scipy.interpolate import griddata
+        last_price = self.last_stock_price
 
-        last_price = self.info.get('regularMarketPrice')
-        if last_price is None:
-            last_price = yf.Ticker(self.ticker.ticker).history(period="1d")['Close'][0]
-
-        lower_strike = last_price * 0.8
-        upper_strike = last_price * 1.2
+        lower_strike = last_price * 0.9
+        upper_strike = last_price * 1.1
 
         max_days_to_exp = 150
 
@@ -419,15 +494,15 @@ def main():
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
 
     #testing_polygon_api("AAPL",client)
-    call_bin_options = options_chain("NVDA", "BinTree Continuous Deriv", 30, "call")
-    call_put_options = options_chain("NVDA","BinTree Continuous Deriv", 30, "put" )
-    call_options_scholes = options_chain("BBWI", "Black Scholes",None,"call")
-    put_options_scholes = options_chain("BBWI", "Black Scholes", None, "put")
+    call_bin_options = options_chain("NVDA", "BinTree Continuous Deriv", 100,30, "call")
+    call_put_options = options_chain("NVDA","BinTree Continuous Deriv", 100,30, "put" )
+    #call_options_scholes = options_chain("CVX", "Black Scholes",None,None,"call")
+    #put_options_scholes = options_chain("CVX", "Black Scholes", None, None, "put")
 
     call_bin_options.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
-    call_options_scholes.plot_imp_vol_surface()
-    put_options_scholes.plot_imp_vol_surface()
+    #call_options_scholes.plot_imp_vol_surface()
+    #put_options_scholes.plot_imp_vol_surface()
 
 if __name__ == "__main__":
     main()
