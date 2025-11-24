@@ -1,9 +1,4 @@
-This script infers the implied volatility surface by two different numerical methods: First, by numerically approximating a solution to the Black-Scholes model for sigma and, second, by backing out sigma from the binomial asset pricing model. 
-
-For the Black-Scholes model, the script pulls in data from Yahoo Finance's API and uses an analytically derived form of Vega, with the Raphson-Newton root finding method, to solve for the implied volatility.
-Please note that this implied volatility is only an approximation, as analytical solutions do not exist for American styled options and results are best near the money. Moreover, this approximation works best for low/no dividend
-yield stocks. Checking a few examples and comparing to publicly published implied volatility numbers, the model performs well under these constraints. Moreover, running the script on a few companies with upcoming earnings, 
-you can see that the implied volatility surface is capturing the market's anticipation of a movement. Below, the curve, for META, was computed on October 17th, 2025, with the upcoming earnings reflected with the elevated ridge. Infeasible solutions, such as outliers, negative volatilities and non-convergent sigmas are filtered from appearing on the surface.  
+Calculates the implied volatility curves using the Binomial Asset Pricing model and Black Scholes Approximation via first order derivative approximation method. The Binomial Asset Pricing model is fast, written in Python and Numpa, and calculates a 100-layer deep binomial tree in approximately 0.001 seconds per option contract on a laptop CPU.
 ![Oct172025](https://github.com/user-attachments/assets/db24167d-f92b-48a4-86c9-9bed41161821)
 
 For the Binomial Asset Pricing Model, a binary tree is created and used to calculate the price of an option. A summary of the method can be found in the paper : "Numerical Methods versus Bjerksund and Stensland
