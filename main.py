@@ -8,8 +8,6 @@ import datetime as dt
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
-from massive import RESTClient
-from dotenv import load_dotenv
 import os
 import time
 from numba import njit, prange
@@ -197,8 +195,16 @@ class options_chain:
                                                 self.risk_free, dates_to_expiration,\
                                                     self.dividend_yield,\
                                                         self.call_or_put)
-                    self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.vectorized_brentq_wrapper)(0.01,2, self.options_chains_dict[key]['strike'],\
-                                                                                                                  self.options_chains_dict[key]['midpoint'])
+                                                        
+                    vec_func = np.vectorize(self.vectorized_brentq_wrapper, otypes=[float])
+                    self.options_chains_dict[key]['calcImpliedVol'] = vec_func(
+                        0.01,
+                        2,
+                        self.options_chains_dict[key]['strike'].values,
+                        self.options_chains_dict[key]['midpoint'].values
+                    )
+                    #self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.vectorized_brentq_wrapper)(0.01,2, self.options_chains_dict[key]['strike'],\
+                                                                                                                  #self.options_chains_dict[key]['midpoint'])
   
         end_time = time.perf_counter()
         print("final time", end_time - start_time)      
@@ -231,7 +237,13 @@ class options_chain:
             if 'bid' in df.columns and 'ask' in df.columns:
                 df['midpoint'] = (df['bid'] + df['ask']) / 2
         self.last_stock_price = self.ticker.history(period="1d")['Close'].iloc[-1]
-        self.risk_free = yf.Ticker("^IRX").history(period="1d")['Close'][-1]/100
+        data = yf.Ticker("^IRX").history(period="5d")
+        if not data.empty:
+            self.risk_free = data['Close'].iloc[-1] / 100
+        else:
+            self.risk_free = 0.04
+
+
         if yf.Ticker(ticker).info.get('dividendYield') != None:
             self.dividend_yield = yf.Ticker(ticker).info.get('dividendYield')/100
         else:
@@ -240,15 +252,18 @@ class options_chain:
         self.calc_implied_volatility(self.number_of_layers)
 
 
+
+
+
     def plot_imp_vol_surface(self):
         last_price = self.last_stock_price
 
         lower_strike = last_price * 0.7
-        upper_strike = last_price * 1.3
+        upper_strike = last_price * 1.5
 
         max_days_to_exp = 150
 
-        strikes_all = []
+        log_moneyness_all = []
         maturities_all = []
         implied_vols_all = []
 
@@ -256,14 +271,14 @@ class options_chain:
             days_to_exp = self.num_dates_to_expir(exp_date)
             if days_to_exp > max_days_to_exp or days_to_exp < 0:
                 continue
-            #purge negative implied vol, excessively high implied vol, deep OTM or ITM options by strike,
+
             valid_mask = (~df['calcImpliedVol'].isna()) & \
                         (df['calcImpliedVol'] > 0) & \
                         (df['calcImpliedVol'] <= 2.0) & \
-                        (df['strike'] >= lower_strike) &\
-                              (df['strike'] <= upper_strike) &\
-                              (df['bid']>0) & (df['ask'] >0) &\
-                              (df['volume']>0)            
+                        (df['strike'] >= lower_strike) & \
+                        (df['strike'] <= upper_strike) & \
+                        (df['bid'] > 0) & (df['ask'] > 0) & \
+                        (df['volume'] > 0)
 
             strikes = df.loc[valid_mask, 'strike'].values
             maturity = days_to_exp
@@ -272,44 +287,45 @@ class options_chain:
             if len(strikes) == 0:
                 continue
 
-            strikes_all.extend(strikes)
+            log_moneyness = np.log(strikes / last_price)
+
+            log_moneyness_all.extend(log_moneyness)
             maturities_all.extend([maturity] * len(strikes))
             implied_vols_all.extend(implied_vols)
 
-        strikes_all = np.array(strikes_all)
+        log_moneyness_all = np.array(log_moneyness_all)
         maturities_all = np.array(maturities_all)
         implied_vols_all = np.array(implied_vols_all)
 
-        
-
-        if len(strikes_all) == 0:
+        if len(log_moneyness_all) == 0:
             print("No data points available for plotting after filtering.")
             return
 
-        strike_grid = np.linspace(strikes_all.min(), strikes_all.max(), 50)
+        logm_grid = np.linspace(log_moneyness_all.min(), log_moneyness_all.max(), 50)
         maturity_grid = np.linspace(maturities_all.min(), maturities_all.max(), 50)
-        M_grid, K_grid = np.meshgrid(maturity_grid, strike_grid)
+
+        M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
 
         IV_grid = griddata(
-            points=(maturities_all, strikes_all),
+            points=(maturities_all, log_moneyness_all),
             values=implied_vols_all,
-            xi=(M_grid, K_grid),
+            xi=(M_grid, LM_grid),
             method='linear'
         )
 
         fig = go.Figure(data=[go.Surface(
             x=M_grid,
-            y=K_grid,
+            y=LM_grid,
             z=IV_grid,
             colorscale='Viridis',
             colorbar=dict(title='Implied Volatility')
         )])
 
         fig.update_layout(
-            title=f"Implied Volatility Surface for {self.ticker.ticker} (Filtered)",
+            title=f"Implied Vol Surface (Log-Moneyness) for {self.ticker.ticker}",
             scene=dict(
                 xaxis_title='Days to Expiration',
-                yaxis_title='Strike Price',
+                yaxis_title='Log-Moneyness ln(K/S)',
                 zaxis_title='Implied Volatility',
             ),
             autosize=True,
@@ -319,6 +335,61 @@ class options_chain:
 
         fig.show()
 
+def test_yfinance(ticker="BBWI"):
+    print(f"\n=== Quick yfinance diagnostic for {ticker} ===")
+    print(f"Today's date (from Python): {dt.date.today()}\n")
+    
+    try:
+        t = yf.Ticker(ticker)
+        
+        # 1. Current price
+        print("Fetching current price...")
+        hist = t.history(period="5d")
+        if hist.empty:
+            print("→ HISTORY IS EMPTY (no recent price data)")
+        else:
+            last_close = hist['Close'].iloc[-1]
+            print(f"→ Last close price: ${last_close:.2f}")
+            print(f"→ History dates: {hist.index[0].date()} to {hist.index[-1].date()}")
+        
+        # 2. Available expiration dates
+        print("\nFetching option expiration dates...")
+        expirations = t.options
+        if not expirations:
+            print("→ NO EXPIRATION DATES FOUND (options likely not available or fetch failed)")
+        else:
+            print(f"→ Found {len(expirations)} expiration dates:")
+            today = dt.date.today()
+            for exp in sorted(expirations)[:8]:  # show first 8
+                exp_date = dt.datetime.strptime(exp, "%Y-%m-%d").date()
+                days_left = (exp_date - today).days
+                print(f"   {exp}  →  {days_left:+4} days from today")
+            if len(expirations) > 8:
+                print(f"   ... and {len(expirations)-8} more")
+        
+        # 3. Try to load one option chain (the soonest one)
+        if expirations:
+            nearest_exp = expirations[0]
+            print(f"\nTrying to load calls for nearest expiry: {nearest_exp}")
+            chain = t.option_chain(nearest_exp).calls
+            if chain.empty:
+                print("→ OPTION CHAIN IS EMPTY")
+            else:
+                print(f"→ Successfully loaded {len(chain)} call contracts")
+                print("   Sample rows (first 3):")
+                print(chain[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest']].head(3))
+        
+        print("\nTest completed.")
+        
+    except Exception as e:
+        print(f"ERROR during yfinance fetch: {type(e).__name__}")
+        print(f"→ {str(e)}")
+        print("   (Common causes: network issue, rate limit, websockets missing, ticker invalid)")
+
+
+
+
+"""
 def testing_polygon_api(ticker,client):
     now = dt.datetime.utcnow()
     thirty_min_ago = now - dt.timedelta(minutes=30)
@@ -338,7 +409,8 @@ def testing_polygon_api(ticker,client):
     for contract in client.list_options_contracts("AAPL"):
         print(contract.ticker)
     
-    return
+    return """
+    
 
 
 def main():
@@ -348,15 +420,16 @@ def main():
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
 
     #testing_polygon_api("AAPL",client)
-    call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
-    call_put_options = options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
-    call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
-    put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
+    call_bin_options = options_chain("NVDA", "BinTree Continuous Deriv", 100,30, "call")
+    print("1")
+    call_put_options = options_chain("NVDA","BinTree Continuous Deriv", 100,30, "put" )
+    #call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
+    #put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
 
     call_bin_options.plot_imp_vol_surface()
-    call_options_scholes.plot_imp_vol_surface()
+    #call_options_scholes.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
-    put_options_scholes.plot_imp_vol_surface()
+    #put_options_scholes.plot_imp_vol_surface()
 
 if __name__ == "__main__":
     main()
