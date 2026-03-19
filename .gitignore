@@ -1,0 +1,63 @@
+# SECRETS & ENVIRONMENT
+.env
+.env.local
+.env.*.local
+
+# IDE / EDITOR
+.vscode/
+.idea/
+*.code-workspace
+
+# PYTHON
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+.conda/
+venv.bak/
+env.bak/
+
+# Numba
+.nba/
+numba_cache/
+
+# DATA & DATABASE VOLUMES
+data/
+db_data/
+postgres_data/
+mysql_data/
+redis_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS JUNK
+.DS_Store
+Thumbs.db
+*.DS_Store
+ehthumbs.db
+
+# LOGS & TEMP
+*.log
+*.tmp
+*.temp
+temp/
+tmp/
+
+# DOCKER
+.dockerignore
+**/.dockerignore
+*.tar

@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:latest
+    container_name: postgres_dev
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Change the end of this line from /data to just /postgresql
+      - postgres_data:/var/lib/postgresql
+
+volumes:
+  postgres_data:
