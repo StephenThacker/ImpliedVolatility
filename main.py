@@ -8,7 +8,7 @@ import csv
 
 load_dotenv()
 
-def stream_stock_data_theta(today, ticker):
+def test_stream_stock_data_theta(today, ticker):
 
     BASE_URL = "http://127.0.0.1:25503/v3"
 
@@ -37,7 +37,7 @@ def stream_stock_data_theta(today, ticker):
         return
     
 
-def stream_stock_option_data_theta(target_date,expiration_date, ticker):
+def test_stream_stock_option_data_theta(target_date,expiration_date, ticker):
 
     BASE_URL = "http://127.0.0.1:25503/v3"
 
@@ -88,11 +88,11 @@ if __name__ == "__main__":
     today_date = date.today()
     ticker = "AAPL"
     print("streaming stock data")
-    stream_stock_data_theta(today_date,ticker)
+    test_stream_stock_data_theta(today_date,ticker)
     test_date = datetime.strptime('2026-02-05', '%Y-%m-%d')
     expir_date = "2026-12-18"
     option_ticker = "AAPL" 
     print("streaming options data")
-    stream_stock_option_data_theta(test_date,expir_date,option_ticker)
+    test_stream_stock_option_data_theta(test_date,expir_date,option_ticker)
 
     main()

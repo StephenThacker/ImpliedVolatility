@@ -95,6 +95,24 @@ class binomial_tree_vectorized():
         except ZeroDivisionError:
             raise ValueError("Division by zero in probability calculation (u == d).")
     
+class calculate_dates:
+
+    def dates_to_expiration_fraction(self, expiration_date):
+        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
+        days_to_expiration = (expiration_date - dt.date.today()).days
+        fraction_of_days = days_to_expiration/365
+        return fraction_of_days
+
+    def dates_to_expiration_days(self,expiration_date):
+        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
+        days_to_expiration = (expiration_date - dt.date.today()).days
+        return days_to_expiration
+
+    def num_dates_to_expir(self,expiration_date):
+        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
+        days_to_expiration = (expiration_date - dt.date.today()).days
+
+        return days_to_expiration
 
 
 
@@ -106,6 +124,7 @@ class options_chain:
         self.method = method
         self.number_of_layers = number_of_layers
         self.call_or_put = call_or_put
+        self.calculate_date_object = calculate_dates()
         self.fetch_options_data(self.ticker)
 
     def vega(self, stock_price, time_to_expiration, cont_div_yield, d_1):
@@ -150,23 +169,6 @@ class options_chain:
             count += 1
         return sigma
     
-    def dates_to_expiration_fraction(self, expiration_date):
-        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
-        fraction_of_days = days_to_expiration/365
-        return fraction_of_days
-    
-    def dates_to_expiration_days(self,expiration_date):
-        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
-        return days_to_expiration
-    
-    def num_dates_to_expir(self,expiration_date):
-        expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
-
-        return days_to_expiration
-    
     def calc_implied_volatility(self,number_of_layers):
         if self.method == 'Black Scholes':
             if self.call_or_put == "call":
@@ -174,7 +176,7 @@ class options_chain:
             if self.call_or_put == "put":
                 bs_price_func = self.black_scholes_put_option
             for key in self.options_chains_dict.keys():
-                date_fraction = self.dates_to_expiration_fraction(key)
+                date_fraction = self.calculate_date_object.dates_to_expiration_fraction(key)
                 self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
                                                                                                                          self.options_chains_dict[key]['midpoint'],\
                                                                                                                             self.risk_free,\
@@ -182,14 +184,16 @@ class options_chain:
                                                                                                                                     date_fraction,\
                                                                                                                                         self.options_chains_dict[key]['strike'],\
                                                                                                                                             bs_price_func)
-                self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
+                self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
 
         start_time = time.perf_counter()
         if self.method == "BinTree Continuous Deriv":
                 count = 0
                 for key in self.options_chains_dict.keys():
-                    dates_to_expiration = self.dates_to_expiration_days(key)
-                    self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.num_dates_to_expir)(key)
+                    print("key", key)
+                    dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key)
+                    print("dates to expiration",dates_to_expiration)
+                    self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
                     self.tree = binomial_tree_vectorized(self.options_chains_dict[key]['strike'],\
                                              self.number_of_layers,self.last_stock_price,\
                                                 self.risk_free, dates_to_expiration,\
@@ -253,8 +257,6 @@ class options_chain:
 
 
 
-
-
     def plot_imp_vol_surface(self):
         last_price = self.last_stock_price
 
@@ -268,7 +270,7 @@ class options_chain:
         implied_vols_all = []
 
         for exp_date, df in self.options_chains_dict.items():
-            days_to_exp = self.num_dates_to_expir(exp_date)
+            days_to_exp = self.calculate_date_object.num_dates_to_expir(exp_date)
             if days_to_exp > max_days_to_exp or days_to_exp < 0:
                 continue
 
@@ -334,6 +336,11 @@ class options_chain:
         )
 
         fig.show()
+
+
+class theta_data_options_scrape():
+    def __init__(self):
+        print("hello world")
 
 def test_yfinance(ticker="BBWI"):
     print(f"\n=== Quick yfinance diagnostic for {ticker} ===")
