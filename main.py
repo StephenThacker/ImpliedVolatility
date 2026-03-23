@@ -1,8 +1,43 @@
 import os
 import psycopg2
 from dotenv import load_dotenv
+import httpx
+import io
+from datetime import datetime, date, timedelta
+import csv
 
 load_dotenv()
+
+def stream_stock_data_theta(today, ticker):
+
+    BASE_URL = "http://127.0.0.1:25503/v3"
+
+    PARAMS = {'symbol': ticker , "start_date" : date, "end_date" : date}
+
+    print("today",today)
+    start_date = today - timedelta(days = 3)
+    end_date = today - timedelta(days = 3)
+
+    if start_date.weekday() < 5:
+        start_date = datetime.strftime(start_date,"%Y%m%d") 
+        end_date = datetime.strftime(end_date,"%Y%m%d") 
+
+        PARAMS['start_date'] = start_date
+        PARAMS['end_date'] = end_date
+
+        url = BASE_URL + '/stock/history/eod'
+
+        with httpx.stream("GET", url, params = PARAMS, timeout= 60) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                for row in csv.reader(io.StringIO(line)):
+                    print(row)
+
+    else:
+        return
+    
+
+    return
 
 def main():
     conn_params = {
@@ -27,4 +62,9 @@ def main():
 
 
 if __name__ == "__main__":
+
+    today_date = date.today()
+    ticker = "AAPL"
+    stream_stock_data_theta(today_date,ticker)
+
     main()

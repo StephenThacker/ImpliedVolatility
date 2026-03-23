@@ -342,7 +342,6 @@ def test_yfinance(ticker="BBWI"):
     try:
         t = yf.Ticker(ticker)
         
-        # 1. Current price
         print("Fetching current price...")
         hist = t.history(period="5d")
         if hist.empty:
@@ -352,7 +351,6 @@ def test_yfinance(ticker="BBWI"):
             print(f"→ Last close price: ${last_close:.2f}")
             print(f"→ History dates: {hist.index[0].date()} to {hist.index[-1].date()}")
         
-        # 2. Available expiration dates
         print("\nFetching option expiration dates...")
         expirations = t.options
         if not expirations:
@@ -367,7 +365,6 @@ def test_yfinance(ticker="BBWI"):
             if len(expirations) > 8:
                 print(f"   ... and {len(expirations)-8} more")
         
-        # 3. Try to load one option chain (the soonest one)
         if expirations:
             nearest_exp = expirations[0]
             print(f"\nTrying to load calls for nearest expiry: {nearest_exp}")
