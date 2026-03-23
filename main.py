@@ -37,7 +37,29 @@ def stream_stock_data_theta(today, ticker):
         return
     
 
-    return
+def stream_stock_option_data_theta(target_date,expiration_date, ticker):
+
+    BASE_URL = "http://127.0.0.1:25503/v3"
+
+    PARAMS = {'start_date': target_date,'end_date': target_date,'symbol': ticker,'expiration': expiration_date}
+
+    if PARAMS["start_date"].weekday() < 5:
+        start_date = datetime.strftime(target_date,"%Y%m%d") 
+        end_date = datetime.strftime(target_date,"%Y%m%d") 
+
+        PARAMS['start_date'] = start_date
+        PARAMS['end_date'] = end_date
+
+        url = BASE_URL + '/option/history/eod'
+
+        with httpx.stream("GET", url, params = PARAMS, timeout=60) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                for row in csv.reader(io.StringIO(line)):
+                    print(row)
+
+    else:
+        return
 
 def main():
     conn_params = {
@@ -65,6 +87,12 @@ if __name__ == "__main__":
 
     today_date = date.today()
     ticker = "AAPL"
+    print("streaming stock data")
     stream_stock_data_theta(today_date,ticker)
+    test_date = datetime.strptime('2026-02-05', '%Y-%m-%d')
+    expir_date = "2026-12-18"
+    option_ticker = "AAPL" 
+    print("streaming options data")
+    stream_stock_option_data_theta(test_date,expir_date,option_ticker)
 
     main()
