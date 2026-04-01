@@ -1,4 +1,5 @@
 import yfinance as yf
+from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
@@ -9,10 +10,16 @@ from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
 import os
+import psycopg2
 import time
 from numba import njit, prange
+import httpx
+import io
+from datetime import date, timedelta
+import csv
+import holidays
 
-
+load_dotenv()
 
 class binomial_tree_vectorized():
 
@@ -111,8 +118,19 @@ class calculate_dates:
     def num_dates_to_expir(self,expiration_date):
         expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
         days_to_expiration = (expiration_date - dt.date.today()).days
-
         return days_to_expiration
+
+    def check_if_day_is_trading_day(self, potential_day: dt ):
+
+        if potential_day.weekday() >= 5:
+            return False
+        
+        nyse_holidays = holidays.financial_holidays('NYSE')
+
+        if potential_day in nyse_holidays:
+            return False
+
+        return True
 
 
 
@@ -185,7 +203,8 @@ class options_chain:
                                                                                                                                         self.options_chains_dict[key]['strike'],\
                                                                                                                                             bs_price_func)
                 self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
-
+        #key is the contract expiration date
+        #dates to expiration, is the dates the contract has to expire
         start_time = time.perf_counter()
         if self.method == "BinTree Continuous Deriv":
                 count = 0
@@ -194,6 +213,10 @@ class options_chain:
                     dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key)
                     print("dates to expiration",dates_to_expiration)
                     self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
+                    print("options chain dataframe, head")
+                    print(self.options_chains_dict[key].head())
+                    print("colums")
+                    print(self.options_chains_dict[key].columns)
                     self.tree = binomial_tree_vectorized(self.options_chains_dict[key]['strike'],\
                                              self.number_of_layers,self.last_stock_price,\
                                                 self.risk_free, dates_to_expiration,\
@@ -203,7 +226,7 @@ class options_chain:
                     vec_func = np.vectorize(self.vectorized_brentq_wrapper, otypes=[float])
                     self.options_chains_dict[key]['calcImpliedVol'] = vec_func(
                         0.01,
-                        2,
+                        5,
                         self.options_chains_dict[key]['strike'].values,
                         self.options_chains_dict[key]['midpoint'].values
                     )
@@ -220,10 +243,10 @@ class options_chain:
             return self.tree.vectorization_of_forward_pass(sigma,strike_price) - midpoint
 
         try:
-            start = time.perf_counter()
+            #start = time.perf_counter()
             result = brentq(brentq_objective, sigma_low, sigma_high, xtol=1e-8, rtol=1e-8, maxiter=100)
-            stop = time.perf_counter()
-            print("time brentq",stop-start)
+            #stop = time.perf_counter()
+            #print("time brentq",stop-start)
             return result
         except ValueError:
             return np.nan
@@ -232,6 +255,8 @@ class options_chain:
         self.ticker = yf.Ticker(ticker)
         expiration_dates = self.ticker.options
         self.info = self.ticker.info
+        print("info")
+        print(self.info)
         if self.call_or_put == "call":
             self.options_chains_dict = {exp : self.ticker.option_chain(exp).calls for exp in expiration_dates}
         if self.call_or_put =="put":
@@ -338,13 +363,100 @@ class options_chain:
         fig.show()
 
 
-class theta_data_options_scrape():
-    def __init__(self):
-        print("hello world")
+#target date is assummed to be a datetime object
+class thetadata_options_scrape_EOD:
+    def __init__(self, ticker,target_date):
+        self.BASE_URL = "http://127.0.0.1:25503/v3"
+        self.PARAMS = {}
+        self.ticker = ticker
+        self.target_date = target_date
+        #might want to refactor calculate dates to be an instance passed to the class, to avoid redundant memory drag
+        #If I'm going to pull data for like 500 tickers
+        self.date_calculator = calculate_dates()
+        if self.date_calculator.check_if_day_is_trading_day(target_date) == False:
+            raise ValueError(f"Target date {target_date} is a weekend or market holiday. Cannot scrape options data.")
+
+
+    #Checks database to see if options data is there
+    #stores options data in database if not there
+    #If options data is in database, retrieves from database
+    def scrape_or_load_options_chain_for_expiration(self,ticker, target_date, expiration_date, conn_params,):
+        BASE_URL = "http://127.0.0.1:25503/v3"
+        PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
+
+        start_date = dt.datetime.strftime(self.target_date,"%Y%m%d") 
+        end_date = dt.datetime.strftime(self.target_date,"%Y%m%d") 
+
+        PARAMS['start_date'] = start_date
+        PARAMS['end_date'] = end_date
+
+        url = BASE_URL + '/option/history/eod'
+
+        with httpx.stream("GET", url, params = PARAMS, timeout=60) as response:
+            response.raise_for_status()
+            content = response.read()
+            df = pd.read_csv(io.BytesIO(content), header = 0)
+
+        df = df.rename(columns = {'right': 'option_type'})
+        df['ticker'] = ticker
+        df['price_date'] = target_date
+
+        df['expiration'] = pd.to_datetime(df['expiration']).dt.date
+        df['price_date'] = pd.to_datetime(df['price_date']).dt.date
+        cols = df.columns
+
+        #purging any NaN values
+        df = df[cols].where(df[cols].notnull(),None)
+
+        cols = [ 'ticker', 'symbol', 'expiration','strike','option_type','created','price_date','last_trade',\
+                'open', 'high','low', 'close', 'volume', 'count', 'bid_size','bid_exchange','bid','bid_condition',\
+                    'ask_size','ask_exchange','ask','ask_condition']
+        
+        insert_sql = '''INSERT INTO options (
+        ticker, symbol, expiration, strike,option_type,created,price_date,last_trade,\
+                open, high,low, close, volume, count, bid_size,bid_exchange,bid,bid_condition,\
+                    ask_size,ask_exchange,ask,ask_condition )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+      
+        '''
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    pandas_generator = df[cols].itertuples(index = False,name = None )
+                    cur.executemany(insert_sql,pandas_generator)
+                    conn.commit()
+                    print("worked")
+                    cur.close()
+                    conn.close()
+
+        except Exception as e:
+            print(e)
+
+            
+        return
+    
+    def store_data_in_postgres_database(self):
+
+        return
+
+
+def theta_data_get_expiration_list_options_ticker(ticker):
+    BASE_URL = "http://127.0.0.1:25503/v3"
+    params = {'symbol': 'AAPL'}
+
+    url = BASE_URL + '/option/list/expirations'
+
+    with httpx.stream("GET", url, params = params, timeout=60) as response:
+        response.raise_for_status()
+        for line in response.iter_lines():
+            for row in csv.reader(io.StringIO(line)):
+                print(row)
+
+
+    return
 
 def test_yfinance(ticker="BBWI"):
-    print(f"\n=== Quick yfinance diagnostic for {ticker} ===")
-    print(f"Today's date (from Python): {dt.date.today()}\n")
     
     try:
         t = yf.Ticker(ticker)
@@ -418,15 +530,28 @@ def testing_polygon_api(ticker,client):
 
 
 def main():
+    conn_params = {
+        "host": "localhost",
+        "database": os.getenv("DB_NAME"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": "5432"
+    }
     #load_dotenv()
     #api_key0 = os.getenv("API_KEY")
     #client = RESTClient(api_key = api_key0)
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
+    print("expirations")
+    #print(theta_data_get_expiration_list_options_ticker('AAPL'))
 
-    #testing_polygon_api("AAPL",client)
-    call_bin_options = options_chain("NVDA", "BinTree Continuous Deriv", 100,30, "call")
+    target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
+    expiration_date = "2026-12-18"
+    thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
+    thetadata_test.scrape_or_load_options_chain_for_expiration('AAPL',target_date,expiration_date,conn_params)
+
+    call_bin_options = options_chain("^SPX", "BinTree Continuous Deriv", 500,30, "call")
     print("1")
-    call_put_options = options_chain("NVDA","BinTree Continuous Deriv", 100,30, "put" )
+    call_put_options = options_chain("^SPX","BinTree Continuous Deriv", 500,30, "put" )
     #call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
     #put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
 

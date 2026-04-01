@@ -14,7 +14,6 @@ def test_stream_stock_data_theta(today, ticker):
 
     PARAMS = {'symbol': ticker , "start_date" : date, "end_date" : date}
 
-    print("today",today)
     start_date = today - timedelta(days = 3)
     end_date = today - timedelta(days = 3)
 
@@ -61,7 +60,7 @@ def test_stream_stock_option_data_theta(target_date,expiration_date, ticker):
     else:
         return
 
-def main():
+'''def main():
     conn_params = {
         "host": "localhost",
         "database": os.getenv("DB_NAME"),
@@ -80,7 +79,7 @@ def main():
                 
                 conn.commit()
     except Exception as e:
-        print(f"DB Error: {e}")
+        print(f"DB Error: {e}")'''
 
 
 if __name__ == "__main__":
@@ -95,4 +94,4 @@ if __name__ == "__main__":
     print("streaming options data")
     test_stream_stock_option_data_theta(test_date,expir_date,option_ticker)
 
-    main()
+    '''main()'''
