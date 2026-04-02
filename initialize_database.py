@@ -5,7 +5,7 @@ import os
 load_dotenv()
 
 
-def main():
+def initalize_options_table():
     conn_params = {
     "host": "localhost",
     "database": os.getenv("DB_NAME"),
@@ -54,11 +54,17 @@ def main():
     except Exception as e:
         print(f"DB Error: {e}")
 
+def initalize_expirations_table():
+    return
+
+def initialize_stock_history_table():
+    return
+
 
 
 
 
 if __name__ == "__main__":
+    pass
+    #initialize_options_table()
 
-
-    main()

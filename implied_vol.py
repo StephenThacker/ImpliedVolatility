@@ -207,16 +207,9 @@ class options_chain:
         #dates to expiration, is the dates the contract has to expire
         start_time = time.perf_counter()
         if self.method == "BinTree Continuous Deriv":
-                count = 0
                 for key in self.options_chains_dict.keys():
-                    print("key", key)
                     dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key)
-                    print("dates to expiration",dates_to_expiration)
                     self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
-                    print("options chain dataframe, head")
-                    print(self.options_chains_dict[key].head())
-                    print("colums")
-                    print(self.options_chains_dict[key].columns)
                     self.tree = binomial_tree_vectorized(self.options_chains_dict[key]['strike'],\
                                              self.number_of_layers,self.last_stock_price,\
                                                 self.risk_free, dates_to_expiration,\
@@ -234,7 +227,6 @@ class options_chain:
                                                                                                                   #self.options_chains_dict[key]['midpoint'])
   
         end_time = time.perf_counter()
-        print("final time", end_time - start_time)      
         return
     
    
@@ -255,8 +247,6 @@ class options_chain:
         self.ticker = yf.Ticker(ticker)
         expiration_dates = self.ticker.options
         self.info = self.ticker.info
-        print("info")
-        print(self.info)
         if self.call_or_put == "call":
             self.options_chains_dict = {exp : self.ticker.option_chain(exp).calls for exp in expiration_dates}
         if self.call_or_put =="put":
@@ -377,10 +367,8 @@ class thetadata_options_scrape_EOD:
             raise ValueError(f"Target date {target_date} is a weekend or market holiday. Cannot scrape options data.")
 
 
-    #Checks database to see if options data is there
-    #stores options data in database if not there
-    #If options data is in database, retrieves from database
-    def scrape_or_load_options_chain_for_expiration(self,ticker, target_date, expiration_date, conn_params,):
+    #for single ticker/expiration date, pulls all options data for a specific date and stores into database
+    def expiration_dat_options_api_pull(self,ticker, target_date, expiration_date, conn_params,):
         BASE_URL = "http://127.0.0.1:25503/v3"
         PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
 
@@ -417,6 +405,7 @@ class thetadata_options_scrape_EOD:
                 open, high,low, close, volume, count, bid_size,bid_exchange,bid,bid_condition,\
                     ask_size,ask_exchange,ask,ask_condition )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING;
       
         '''
 
@@ -425,19 +414,10 @@ class thetadata_options_scrape_EOD:
                 with conn.cursor() as cur:
                     pandas_generator = df[cols].itertuples(index = False,name = None )
                     cur.executemany(insert_sql,pandas_generator)
-                    conn.commit()
-                    print("worked")
-                    cur.close()
-                    conn.close()
-
         except Exception as e:
             print(e)
 
             
-        return
-    
-    def store_data_in_postgres_database(self):
-
         return
 
 
@@ -456,6 +436,7 @@ def theta_data_get_expiration_list_options_ticker(ticker):
 
     return
 
+#AI Generated Unit test for yfinance functionality
 def test_yfinance(ticker="BBWI"):
     
     try:
@@ -542,23 +523,22 @@ def main():
     #client = RESTClient(api_key = api_key0)
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
     print("expirations")
-    #print(theta_data_get_expiration_list_options_ticker('AAPL'))
+    print(theta_data_get_expiration_list_options_ticker('AAPL'))
 
     target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
     expiration_date = "2026-12-18"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
     thetadata_test.scrape_or_load_options_chain_for_expiration('AAPL',target_date,expiration_date,conn_params)
 
-    call_bin_options = options_chain("^SPX", "BinTree Continuous Deriv", 500,30, "call")
-    print("1")
-    call_put_options = options_chain("^SPX","BinTree Continuous Deriv", 500,30, "put" )
-    #call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
-    #put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
+    call_bin_options = options_chain("CVX", "BinTree Continuous Deriv", 100,30, "call")
+    call_put_options = options_chain("CVX","BinTree Continuous Deriv", 100,30, "put" )
+    call_options_scholes = options_chain("CVX", "Black Scholes",None,None,"call")
+    put_options_scholes = options_chain("CVX", "Black Scholes", None, None, "put")
 
     call_bin_options.plot_imp_vol_surface()
-    #call_options_scholes.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
-    #put_options_scholes.plot_imp_vol_surface()
+    call_options_scholes.plot_imp_vol_surface()
+    put_options_scholes.plot_imp_vol_surface()
 
 if __name__ == "__main__":
     main()
