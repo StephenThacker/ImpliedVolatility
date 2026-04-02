@@ -368,7 +368,7 @@ class thetadata_options_scrape_EOD:
 
 
     #for single ticker/expiration date, pulls all options data for a specific date and stores into database
-    def expiration_dat_options_api_pull(self,ticker, target_date, expiration_date, conn_params):
+    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params):
         BASE_URL = "http://127.0.0.1:25503/v3"
         PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
 
@@ -428,18 +428,36 @@ class thetadata_options_scrape_EOD:
         return
 
     #need to update this to store in database
-    def theta_data_get_expiration_list_options_ticker(self, ticker):
+    def get_expiration_list_options_ticker(self, ticker, conn_params):
         BASE_URL = "http://127.0.0.1:25503/v3"
-        params = {'symbol': 'AAPL'}
+        params = {'symbol': ticker}
 
         url = BASE_URL + '/option/list/expirations'
 
+        data_to_store = []
         with httpx.stream("GET", url, params = params, timeout=60) as response:
             response.raise_for_status()
-            for line in response.iter_lines():
+            iter_lines = response.iter_lines()
+            #skip header
+            next(iter_lines)
+            for line in iter_lines:
                 for row in csv.reader(io.StringIO(line)):
-                    print(row)
+                    date = dt.datetime.strptime(row[1], '%Y-%m-%d').date()
+                    data_to_store.append(date)
+                
+        insert_sql = '''INSERT INTO expiration_series (
+        ticker , dates)
+                    VALUES (%s, %s)
+                    ON CONFLICT DO NOTHING;
+        '''
 
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    arguments = (ticker, data_to_store)
+                    cur.execute(insert_sql,arguments)
+        except Exception as e:
+            print(e)
 
         return
 
@@ -529,13 +547,12 @@ def main():
     #api_key0 = os.getenv("API_KEY")
     #client = RESTClient(api_key = api_key0)
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
-    print("expirations")
-    print(theta_data_get_expiration_list_options_ticker('AAPL'))
 
     target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
     expiration_date = "2026-12-18"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
-    thetadata_test.scrape_or_load_options_chain_for_expiration('AAPL',target_date,expiration_date,conn_params)
+    thetadata_test.get_expiration_list_options_ticker('AAPL',conn_params)
+    thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
 
     call_bin_options = options_chain("CVX", "BinTree Continuous Deriv", 100,30, "call")
     call_put_options = options_chain("CVX","BinTree Continuous Deriv", 100,30, "put" )
