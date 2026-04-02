@@ -5,6 +5,36 @@ import os
 load_dotenv()
 
 
+def initalize_expirations_table():
+    conn_params = {
+    "host": "localhost",
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "port": "5432"
+    }
+
+    SQL_QUERY = '''CREATE TABLE IF NOT EXISTS expiration_series (
+                   ticker VARCHAR(10),
+                   dates  DATE[] NOT NULL,
+                   PRIMARY KEY (ticker)
+     
+    
+    )'''
+
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(SQL_QUERY)
+                conn.commit()
+
+                
+    except Exception as e:
+        print(f"DB Error: {e}")
+        
+    return
+
 def initalize_options_table():
     conn_params = {
     "host": "localhost",
@@ -54,8 +84,7 @@ def initalize_options_table():
     except Exception as e:
         print(f"DB Error: {e}")
 
-def initalize_expirations_table():
-    return
+
 
 def initialize_stock_history_table():
     return
@@ -65,6 +94,6 @@ def initialize_stock_history_table():
 
 
 if __name__ == "__main__":
+    initalize_expirations_table()
     pass
-    #initialize_options_table()
 

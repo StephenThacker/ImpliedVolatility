@@ -368,7 +368,7 @@ class thetadata_options_scrape_EOD:
 
 
     #for single ticker/expiration date, pulls all options data for a specific date and stores into database
-    def expiration_dat_options_api_pull(self,ticker, target_date, expiration_date, conn_params,):
+    def expiration_dat_options_api_pull(self,ticker, target_date, expiration_date, conn_params):
         BASE_URL = "http://127.0.0.1:25503/v3"
         PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
 
@@ -419,22 +419,29 @@ class thetadata_options_scrape_EOD:
 
             
         return
+    
+    def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date):
+        return
+    
+    #Reads Pandas 
+    def pull_options_data_from_database(self, ticker, target_date ):
+        return
+
+    #need to update this to store in database
+    def theta_data_get_expiration_list_options_ticker(self, ticker):
+        BASE_URL = "http://127.0.0.1:25503/v3"
+        params = {'symbol': 'AAPL'}
+
+        url = BASE_URL + '/option/list/expirations'
+
+        with httpx.stream("GET", url, params = params, timeout=60) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                for row in csv.reader(io.StringIO(line)):
+                    print(row)
 
 
-def theta_data_get_expiration_list_options_ticker(ticker):
-    BASE_URL = "http://127.0.0.1:25503/v3"
-    params = {'symbol': 'AAPL'}
-
-    url = BASE_URL + '/option/list/expirations'
-
-    with httpx.stream("GET", url, params = params, timeout=60) as response:
-        response.raise_for_status()
-        for line in response.iter_lines():
-            for row in csv.reader(io.StringIO(line)):
-                print(row)
-
-
-    return
+        return
 
 #AI Generated Unit test for yfinance functionality
 def test_yfinance(ticker="BBWI"):
