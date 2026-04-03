@@ -253,8 +253,11 @@ class options_chain:
             self.options_chains_dict = {exp : self.ticker.option_chain(exp).puts for exp in expiration_dates}
 
         for exp, df in self.options_chains_dict.items():
+            #print("df columns test")
+            #print(df.columns)
             if 'bid' in df.columns and 'ask' in df.columns:
                 df['midpoint'] = (df['bid'] + df['ask']) / 2
+            print(df.head())
         self.last_stock_price = self.ticker.history(period="1d")['Close'].iloc[-1]
         data = yf.Ticker("^IRX").history(period="5d")
         if not data.empty:
@@ -423,6 +426,65 @@ class thetadata_options_scrape_EOD:
     def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date):
         return
     
+
+    def try_fetch_save_expiration(self, ticker, conn_params, expiration, target_date):
+
+
+
+        return
+    
+
+    def pull_expiration_list_from_database(self,ticker,conn_params):
+
+        retrieve_dates = '''SELECT dates from expiration_series WHERE ticker = %s; '''
+
+        #pull date list from postgres database
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(retrieve_dates, [ticker])
+                    dates_tuple = cur.fetchall()[0]
+        except Exception as e:
+            print(e)
+
+        return dates_tuple
+    
+    #Given a target date, pulls expiration data through the available options chain expirations
+    #,pulling data from API and storing in the database
+    def iterate_through_expirations(self, ticker, target_date, conn_params):
+        
+
+        sql_query = '''SELECT (expiration, strike, option_type, price_date) '''
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(retrieve_dates, [ticker])
+                    dates_tuple = cur.fetchall()[0]
+        except Exception as e:
+            print(e)
+
+
+
+        #iterate through the list of dates
+        #check if date is in database
+        dates_tuple = self.pull_expiration_list_from_database(ticker,conn_params)
+
+
+        #if date is not in database, pull from API and put it in database
+
+        #if 
+
+        return
+    
+    #Pulls options expiration list from database
+    #iterates through all expiration dates
+    #Either pulls from the API or reads from the database, if the data is already there
+    #Takes this data, formats it into the correct format
+    #feeds it to the different volatility surface models
+    def recreate_options_surface_from_database(self):
+
+        return
+
     #Reads Pandas 
     def pull_options_data_from_database(self, ticker, target_date ):
         return
@@ -462,7 +524,7 @@ class thetadata_options_scrape_EOD:
         return
 
 #AI Generated Unit test for yfinance functionality
-def test_yfinance(ticker="BBWI"):
+def test_yfinance(ticker="BBWI"):#
     
     try:
         t = yf.Ticker(ticker)
@@ -553,11 +615,12 @@ def main():
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
     thetadata_test.get_expiration_list_options_ticker('AAPL',conn_params)
     thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
+    #thetadata_test.iterate_through_expirations('AAPL', target_date, conn_params)
 
-    call_bin_options = options_chain("CVX", "BinTree Continuous Deriv", 100,30, "call")
-    call_put_options = options_chain("CVX","BinTree Continuous Deriv", 100,30, "put" )
-    call_options_scholes = options_chain("CVX", "Black Scholes",None,None,"call")
-    put_options_scholes = options_chain("CVX", "Black Scholes", None, None, "put")
+    call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
+    call_put_options = options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
+    call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
+    put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
 
     call_bin_options.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
