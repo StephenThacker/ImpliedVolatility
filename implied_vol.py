@@ -255,6 +255,7 @@ class options_chain:
         for exp, df in self.options_chains_dict.items():
             #print("df columns test")
             #print(df.columns)
+            print(df.columns)
             if 'bid' in df.columns and 'ask' in df.columns:
                 df['midpoint'] = (df['bid'] + df['ask']) / 2
             print(df.head())
@@ -394,6 +395,7 @@ class thetadata_options_scrape_EOD:
 
         df['expiration'] = pd.to_datetime(df['expiration']).dt.date
         df['price_date'] = pd.to_datetime(df['price_date']).dt.date
+        df['midpoint'] = (df['ask'] + df['bid'])/2
         cols = df.columns
 
         #purging any NaN values
@@ -401,13 +403,13 @@ class thetadata_options_scrape_EOD:
 
         cols = [ 'ticker', 'symbol', 'expiration','strike','option_type','created','price_date','last_trade',\
                 'open', 'high','low', 'close', 'volume', 'count', 'bid_size','bid_exchange','bid','bid_condition',\
-                    'ask_size','ask_exchange','ask','ask_condition']
+                    'ask_size','ask_exchange','ask','ask_condition', 'midpoint']
         
         insert_sql = '''INSERT INTO options (
         ticker, symbol, expiration, strike,option_type,created,price_date,last_trade,\
                 open, high,low, close, volume, count, bid_size,bid_exchange,bid,bid_condition,\
-                    ask_size,ask_exchange,ask,ask_condition )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ask_size,ask_exchange,ask,ask_condition, midpoint )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT DO NOTHING;
       
         '''
@@ -423,7 +425,15 @@ class thetadata_options_scrape_EOD:
             
         return
     
-    def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date):
+
+    # need a way to scrape the interest rate..    
+    def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date, conn_params):
+
+        sql_query = '''SELECT (ticker, strike, midpoint, expiration, price_date, stock_price, interest_rate)'''
+
+
+
+
         return
     
 
@@ -449,12 +459,16 @@ class thetadata_options_scrape_EOD:
 
         return dates_tuple
     
+    #scrape daily interestrate data
+    def scrape_data_interest_rate_data(self):
+        return
+    
     #Given a target date, pulls expiration data through the available options chain expirations
     #,pulling data from API and storing in the database
     def iterate_through_expirations(self, ticker, target_date, conn_params):
         
 
-        sql_query = '''SELECT (expiration, strike, option_type, price_date) '''
+        sql_query = '''SELECT (ticker, price_date, strike, option_type, bid, ask, midpoint) '''
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
@@ -523,54 +537,6 @@ class thetadata_options_scrape_EOD:
 
         return
 
-#AI Generated Unit test for yfinance functionality
-def test_yfinance(ticker="BBWI"):#
-    
-    try:
-        t = yf.Ticker(ticker)
-        
-        print("Fetching current price...")
-        hist = t.history(period="5d")
-        if hist.empty:
-            print("→ HISTORY IS EMPTY (no recent price data)")
-        else:
-            last_close = hist['Close'].iloc[-1]
-            print(f"→ Last close price: ${last_close:.2f}")
-            print(f"→ History dates: {hist.index[0].date()} to {hist.index[-1].date()}")
-        
-        print("\nFetching option expiration dates...")
-        expirations = t.options
-        if not expirations:
-            print("→ NO EXPIRATION DATES FOUND (options likely not available or fetch failed)")
-        else:
-            print(f"→ Found {len(expirations)} expiration dates:")
-            today = dt.date.today()
-            for exp in sorted(expirations)[:8]:  # show first 8
-                exp_date = dt.datetime.strptime(exp, "%Y-%m-%d").date()
-                days_left = (exp_date - today).days
-                print(f"   {exp}  →  {days_left:+4} days from today")
-            if len(expirations) > 8:
-                print(f"   ... and {len(expirations)-8} more")
-        
-        if expirations:
-            nearest_exp = expirations[0]
-            print(f"\nTrying to load calls for nearest expiry: {nearest_exp}")
-            chain = t.option_chain(nearest_exp).calls
-            if chain.empty:
-                print("→ OPTION CHAIN IS EMPTY")
-            else:
-                print(f"→ Successfully loaded {len(chain)} call contracts")
-                print("   Sample rows (first 3):")
-                print(chain[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest']].head(3))
-        
-        print("\nTest completed.")
-        
-    except Exception as e:
-        print(f"ERROR during yfinance fetch: {type(e).__name__}")
-        print(f"→ {str(e)}")
-        print("   (Common causes: network issue, rate limit, websockets missing, ticker invalid)")
-
-
 
 
 """
@@ -609,6 +575,8 @@ def main():
     #api_key0 = os.getenv("API_KEY")
     #client = RESTClient(api_key = api_key0)
     #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
+
+    
 
     target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
     expiration_date = "2026-12-18"
