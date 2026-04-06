@@ -4,6 +4,10 @@ import os
 import pandas as pd
 import openpyxl
 from io import StringIO
+import yfinance as yf
+
+#Contains "one-time load" scripts related to initalizing database tables or transferring CSV/API historical data to databases
+#i.e., pull interest rates from CSV file and store in database
 
 load_dotenv()
 
@@ -79,16 +83,13 @@ def initalize_options_table(conn_params):
 
 
 
-def initialize_stock_history_table():
-    return
-
-
 def initialize_stock_data_table(conn_params):
     create_table = '''CREATE TABLE IF NOT EXISTS stock_data (
        ticker VARCHAR(10),
-       dividend_yield DOUBLE PRECISION,
+       date DATE,
+       dividend DOUBLE PRECISION,
 
-       PRIMARY KEY (ticker)
+       PRIMARY KEY (ticker, date)
        )
        '''
     
@@ -145,8 +146,6 @@ def store_interest_rates_in_db(conn_params):
     cols = ['Effective Date', 'Rate (%)']
 
     df = df[cols].where(df[cols].notnull(),None)
-    print("columns")
-    print(df.columns)
 
     pandas_generator = df[cols].itertuples(index=False, name=None)
 
@@ -160,6 +159,47 @@ def store_interest_rates_in_db(conn_params):
 
     return
 
+#stores stock dividends from date range into database
+def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
+    stock = yf.Ticker(ticker)
+
+    dividends = stock.dividends
+    dividends = dividends[date_start:date_end]
+    data = {'ticker' : ticker, "date" :dividends.index.date,'dividend' : dividends.values}
+    df = pd.DataFrame(data)
+    print(df["date"])
+    del dividends
+    insert_sql = '''INSERT INTO stock_data (ticker, date, dividend) VALUES (%s, %s, %s) 
+                    ON CONFLICT DO NOTHING'''
+    
+
+    
+    pandas_generator = df.itertuples(index= False, name = None)
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(insert_sql,pandas_generator)
+    except Exception as e:
+        print(e)
+
+    print("2")
+
+    """
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM stock_data")
+                results = cur.fetchall()
+    except Exception as e: 
+        print(e)
+
+    for row in results:
+        print(row)
+
+
+
+    #dividends = stock.dividends.loc[date_start,date_end]"""
+
 
 
 
@@ -171,7 +211,9 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-    store_interest_rates_in_db(conn_params)
+    #store_interest_rates_in_db(conn_params)
+    initialize_stock_data_table(conn_params)
+    store_stock_dividends_yfinance("AAPL","2023-01-01","2026-06-04", conn_params)
 
     #initalize_expirations_table()
     #initalize_options_table()
