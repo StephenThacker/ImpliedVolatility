@@ -13,6 +13,24 @@ import datetime as dt
 
 load_dotenv()
 
+def add_imp_vol_columns_to_table(conn_params):
+
+    SQL_QUERY = ''' ALTER TABLE options 
+                    ADD COLUMN bs_implied_vol DOUBLE PRECISION,
+                    ADD COLUMN bin_imp_vol DOUBLE PRECISION   '''
+    
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(SQL_QUERY)
+                conn.commit()
+
+                
+    except Exception as e:
+        print(e)
+
+
 
 def initalize_expirations_table(conn_params):
 
@@ -66,6 +84,8 @@ def initalize_options_table(conn_params):
                     ask DOUBLE PRECISION,
                     ask_condition BIGINT,
                     midpoint DOUBLE PRECISION,
+                    bs_implied_vol DOUBLE PRECISION,
+                    bin_imp_vol DOUBLE PRECISION,
 
 
                     PRIMARY KEY (ticker, expiration, price_date, strike, option_type)
@@ -268,6 +288,8 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
+
+    #add_imp_vol_columns_to_table(conn_params)
     #store_interest_rates_in_db(conn_params)
     #initialize_stock_data_table(conn_params)
     #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)
@@ -276,6 +298,6 @@ if __name__ == "__main__":
 
     #store_stock_price_history_yfinance('AAPL',conn_params)
     #initalize_expirations_table()
-    initalize_options_table(conn_params)
+    #initalize_options_table(conn_params)
     #initialize_general_market_data_table(conn_params)
 

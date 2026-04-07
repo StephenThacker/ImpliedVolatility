@@ -132,6 +132,60 @@ class calculate_dates:
 
         return True
 
+class black_scholes_implied_volatility:
+
+    def __init__(self):
+        self.call_or_put_method = self.construct_call_or_put_dict()
+
+    def vega(self, stock_price, time_to_expiration, cont_div_yield, d_1):
+        vega = stock_price*np.exp(-1*cont_div_yield*time_to_expiration)*1/np.sqrt(2*np.pi)*np.exp(-1*(d_1**2)/2)*np.sqrt(time_to_expiration)
+        return vega
+
+    def black_scholes_call_option(self, stock_price, contin_div_yield, time_to_expiration,d_1, d_2, strike_price , risk_free_rate):
+        price = stock_price*np.exp(-contin_div_yield*time_to_expiration)*norm.cdf(d_1) - strike_price*np.exp(-risk_free_rate*time_to_expiration)*norm.cdf(d_2)
+        return price
+    
+    def black_scholes_put_option(self, stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate):
+        price = strike_price*np.exp(-1*risk_free_rate*time_to_expiration)*norm.cdf(-1*d_2) - stock_price*np.exp(-1*contin_div_yield*time_to_expiration)*norm.cdf(-1*d_1)
+        return price
+
+    def d_1(self, strike_price, stock_price, risk_free_rate, cont_div_yield, sigma, time_to_expiration):
+        d_1 = (np.log(stock_price/strike_price)+(risk_free_rate - cont_div_yield + (sigma**2)/2)*time_to_expiration)/(sigma*np.sqrt(time_to_expiration))
+        return d_1
+
+    def d_2(self, d_1, time_to_expiration, sigma):
+        d2 = d_1 - sigma*np.sqrt(time_to_expiration)
+        return d2
+    
+    def construct_call_or_put_dict(self):
+        func_dict= {'CALL' : self.black_scholes_call_option, 'PUT' : self.black_scholes_put_option}
+
+        return func_dict
+    
+    def newton_raphson_method_black_scholes(self, epsilon,stock_price, option_price,risk_free_rate, contin_div_yield, time_to_expiration, strike_price, bs_price_func):
+        sigma = 0.8
+        black_scholes_cost = 1
+        market_cost = 0
+        max_iter = 400
+        count = 0
+        bs_price_func = bs_price_func
+        while (np.abs(black_scholes_cost - market_cost) > epsilon) and count< max_iter:
+
+            d_1 = self.d_1(strike_price, stock_price, risk_free_rate,contin_div_yield,sigma,time_to_expiration)
+            d_2 = self.d_2(d_1, time_to_expiration, sigma)
+            black_scholes_cost = bs_price_func(stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate)
+            market_cost = option_price
+            vega = self.vega(stock_price, time_to_expiration, contin_div_yield, d_1)
+
+            if abs(vega) < 1e-8:
+                break
+            sigma = sigma - (black_scholes_cost - market_cost)/(vega)
+
+            count += 1
+        return sigma
+
+
+
 
 
 class options_chain:
@@ -367,6 +421,7 @@ class thetadata_options_scrape_EOD:
         #might want to refactor calculate dates to be an instance passed to the class, to avoid redundant memory drag
         #If I'm going to pull data for like 500 tickers
         self.date_calculator = calculate_dates()
+        self.black_scholes = black_scholes_implied_volatility()
         if self.date_calculator.check_if_day_is_trading_day(target_date) == False:
             raise ValueError(f"Target date {target_date} is a weekend or market holiday. Cannot scrape options data.")
 
@@ -426,9 +481,10 @@ class thetadata_options_scrape_EOD:
         return
 
 
-    def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date, conn_params):
+    def pull_options_data_from_database_per_expiration(self, ticker, target_date, expiration_date, conn_params):
 
-        sql_query = '''SELECT strike, midpoint, expiration, price_date, option_type
+        #extract options data from database
+        sql_query = '''SELECT ticker, strike, midpoint, expiration, price_date, option_type
                        FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
                        ORDER BY strike ASC'''
         
@@ -442,7 +498,7 @@ class thetadata_options_scrape_EOD:
             print(e)
 
 
-        #pulling risk free rate
+        #pulling risk free rate from database and broadcasting to pandas dataframe
         sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
         args = [target_date]
 
@@ -457,6 +513,7 @@ class thetadata_options_scrape_EOD:
         df["risk_free"] = results[0][0]
 
 
+        #pulling EOD stock data and broadcasting to pandas dataframe
         sql_query = '''SELECT close FROM stock_data WHERE date = %s AND ticker = %s'''
         args = [target_date, ticker]
         try:
@@ -470,14 +527,101 @@ class thetadata_options_scrape_EOD:
 
         df["stock_price"] = results[0][0]
 
+        #converting expiration date to date fraction and broadcasting to pandas dataframe
+        date_fraction = self.date_calculator.dates_to_expiration_fraction(expiration_date)
+        df["date_fraction"] = date_fraction
+
+        #going to replace with real dividend yield, but need to calculate in database to handle it. 
+        df['dividend_yield'] = 1/100
+
+        return df
+    
+    def pull_data_and_calc_black_scholes_imp_vol(self, ticker, target_date, expiration_date, conn_params ):
+        options_data = self.pull_options_data_from_database_per_expiration( ticker, target_date, expiration_date, conn_params)
+        
+        self.black_scholes_calculation(options_data, conn_params)
+
         return
     
 
-    def try_fetch_save_expiration(self, ticker, conn_params, expiration, target_date):
+    #calculates and stores implied vol
+    def black_scholes_calculation(self, options_dataframe, conn_params):
+
+        def call_or_put(arg_string):
+            return self.black_scholes.call_or_put_method[arg_string]
+        
+        options_dataframe['risk_free'] = options_dataframe['risk_free']/100
+
+        options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
+
+        options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
+                                        (1e-5, options_dataframe['stock_price'],\
+                                        options_dataframe['midpoint'],\
+                                        options_dataframe['risk_free'],\
+                                        options_dataframe['dividend_yield'],\
+                                        options_dataframe['date_fraction'],\
+                                        options_dataframe['strike'],\
+                                        options_dataframe['call_or_put_func'])
+        
 
 
+        #Check values to see if it looks good. 
+        '''
+        call_df = options_dataframe[options_dataframe['option_type'] == "CALL"]
+        put_df = options_dataframe[options_dataframe['option_type'] == 'PUT']
 
+        print("printing df call rows")
+        for row in call_df[['strike','implied_vol']].itertuples():
+            print(row)
+
+        print("printing df put rows")
+        for row in put_df[['strike','implied_vol']].itertuples():
+            print(row)'''
+        
+
+        #clean IV values to remove non-convergent numbers and replace with None.
+        options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
+                                                                  (options_dataframe['implied_vol']>4), None)
+        
+        #Store in database
+        sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
+                       VALUES (%s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (ticker, expiration, price_date, strike, option_type)
+                       DO UPDATE SET
+                       bs_implied_vol = EXCLUDED.bs_implied_vol'''
+        
+        columns = ['ticker', 'expiration', 'price_date', 'strike', 'option_type', 'implied_vol']
+
+        pd_generator = options_dataframe[columns].itertuples(index = False, name = None)
+
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.executemany(sql_query, pd_generator)
+        except Exception as e:
+            print(e)
+
+        #check to see if inserted properly
+        sql_query = '''SELECT bs_implied_vol FROM options'''
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_query)
+                    results = cur.fetchall()
+        except Exception as e:
+            print(e)
+
+        print("testing database rows")
+        for row in results:
+            print(row)
+        
         return
+
+
+
+
     
 
     def pull_expiration_list_from_database(self,ticker,conn_params):
@@ -621,9 +765,10 @@ def main():
     thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
-    thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
-                                                                                conn_params)
-    #thetadata_test.iterate_through_expirations('AAPL', target_date, conn_params)
+    '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
+                                                                                conn_params)'''
+    
+    thetadata_test.pull_data_and_calc_black_scholes_imp_vol("AAPL", target_date, expiration_date, conn_params)
 
     call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
     call_put_options = options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
