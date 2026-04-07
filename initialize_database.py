@@ -5,6 +5,8 @@ import pandas as pd
 import openpyxl
 from io import StringIO
 import yfinance as yf
+from datetime import date, timedelta
+import datetime as dt
 
 #Contains "one-time load" scripts related to initalizing database tables or transferring CSV/API historical data to databases
 #i.e., pull interest rates from CSV file and store in database
@@ -88,6 +90,11 @@ def initialize_stock_data_table(conn_params):
        ticker VARCHAR(10),
        date DATE,
        dividend DOUBLE PRECISION,
+       close DOUBLE PRECISION,
+       open DOUBLE PRECISION,
+       high DOUBLE PRECISION,
+       low DOUBLE PRECISION,
+       volume BIGINT,
 
        PRIMARY KEY (ticker, date)
        )
@@ -181,9 +188,7 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
                 cur.executemany(insert_sql,pandas_generator)
     except Exception as e:
         print(e)
-
-    print("2")
-
+        
     """
     try:
         with psycopg2.connect(**conn_params) as conn:
@@ -200,6 +205,58 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
 
     #dividends = stock.dividends.loc[date_start,date_end]"""
 
+    #stores EOD stock price history for last 10 years for a single stock ticker
+def store_stock_price_history_yfinance(ticker, conn_params):
+
+    stock = yf.Ticker(ticker)
+
+    stock_price = stock.history(period="10y")
+
+
+    df_data = {"ticker": ticker, "date": stock_price.index.date, "close": stock_price["Close"], "open": stock_price["Open"], \
+                "high": stock_price["High"],"low": stock_price["Low"], "volume": stock_price["Volume"]}
+    
+    df = pd.DataFrame(df_data)
+
+
+
+    insert_sql = '''INSERT INTO stock_data 
+                    (ticker, date, close, open, high, low, volume)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT DO NOTHING'''
+    
+    pandas_generator = df.itertuples(index = False, name = None)
+
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(insert_sql,pandas_generator)
+    except Exception as e:
+        print(e)
+
+    '''
+    query_first = "SELECT * FROM stock_data ORDER BY date ASC LIMIT 100;"
+    query_last = "SELECT * FROM stock_data ORDER BY date DESC LIMIT 100;"
+
+    try:
+            with psycopg2.connect(**conn_params) as conn:
+                df_first = pd.read_sql_query(query_first, conn)
+                
+                df_last = pd.read_sql_query(query_last, conn)
+
+                print(df_first)
+                
+                print(df_last.sort_values('date'))
+
+    except Exception as e:
+        print(e)'''
+
+
+
+
+    return
+
 
 
 
@@ -213,10 +270,12 @@ if __name__ == "__main__":
     }
     #store_interest_rates_in_db(conn_params)
     initialize_stock_data_table(conn_params)
-    store_stock_dividends_yfinance("AAPL","2023-01-01","2026-06-04", conn_params)
+    #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)
+    target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
+    end_date = target_date + timedelta(days = 1)
 
+    store_stock_price_history_yfinance('AAPL',conn_params)
     #initalize_expirations_table()
     #initalize_options_table()
     #initialize_general_market_data_table(conn_params)
-    #initialize_stock_data_table(conn_params)
 

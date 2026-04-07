@@ -424,7 +424,7 @@ class thetadata_options_scrape_EOD:
 
             
         return
-    
+
 
     # need a way to scrape the interest rate..    
     def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date, conn_params):
@@ -583,6 +583,8 @@ def main():
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
     thetadata_test.get_expiration_list_options_ticker('AAPL',conn_params)
     thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
+    stock_range_start_date = target_date
+    stock_range_end_date = target_date + timedelta(days = 10)
     #thetadata_test.iterate_through_expirations('AAPL', target_date, conn_params)
 
     call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
