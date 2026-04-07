@@ -269,13 +269,13 @@ if __name__ == "__main__":
     "port": "5432"
     }
     #store_interest_rates_in_db(conn_params)
-    initialize_stock_data_table(conn_params)
+    #initialize_stock_data_table(conn_params)
     #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)
-    target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
-    end_date = target_date + timedelta(days = 1)
+    #target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
+    #end_date = target_date + timedelta(days = 1)
 
-    store_stock_price_history_yfinance('AAPL',conn_params)
+    #store_stock_price_history_yfinance('AAPL',conn_params)
     #initalize_expirations_table()
-    #initalize_options_table()
+    initalize_options_table(conn_params)
     #initialize_general_market_data_table(conn_params)
 

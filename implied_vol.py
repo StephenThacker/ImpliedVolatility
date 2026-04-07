@@ -426,13 +426,49 @@ class thetadata_options_scrape_EOD:
         return
 
 
-    # need a way to scrape the interest rate..    
     def pull_options_data_from_database_per_expiration(self,  ticker, target_date, expiration_date, conn_params):
 
-        sql_query = '''SELECT (ticker, strike, midpoint, expiration, price_date, stock_price, interest_rate)'''
+        sql_query = '''SELECT strike, midpoint, expiration, price_date, option_type
+                       FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
+                       ORDER BY strike ASC'''
+        
+        args = [ticker, expiration_date, target_date]
+        
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    df = pd.read_sql(sql_query, conn, params = args)
+        except Exception as e:
+            print(e)
 
 
+        #pulling risk free rate
+        sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
+        args = [target_date]
 
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_query,args)
+                    results = cur.fetchall()
+        except Exception as e:
+            print(e)
+            
+        df["risk_free"] = results[0][0]
+
+
+        sql_query = '''SELECT close FROM stock_data WHERE date = %s AND ticker = %s'''
+        args = [target_date, ticker]
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_query,args)
+                    results = cur.fetchall()
+        except Exception as e:
+            print(e)
+
+
+        df["stock_price"] = results[0][0]
 
         return
     
@@ -585,6 +621,8 @@ def main():
     thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
+    thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
+                                                                                conn_params)
     #thetadata_test.iterate_through_expirations('AAPL', target_date, conn_params)
 
     call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
