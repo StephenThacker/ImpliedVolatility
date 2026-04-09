@@ -508,7 +508,6 @@ class thetadata_options_scrape_EOD:
 
     #calculates and stores implied vol
     def black_scholes_calculation(self, options_dataframe, conn_params):
-        print("here")
         def call_or_put(arg_string):
             return self.black_scholes.call_or_put_method[arg_string]
         
@@ -545,7 +544,6 @@ class thetadata_options_scrape_EOD:
         options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
                                                                   (options_dataframe['implied_vol']>4), 0)
         
-        print(options_dataframe['implied_vol'])
         
         #Store in database
         sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
@@ -611,6 +609,7 @@ class thetadata_options_scrape_EOD:
     def scrape_data_interest_rate_data(self):
         return
     
+    
     #Given a target date, pulls expiration data through the available options chain expirations
     #pulling data from API and storing in the database
 
@@ -636,10 +635,11 @@ class thetadata_options_scrape_EOD:
             exists_query = '''SELECT (EXISTS ( SELECT 1 
                               FROM options
                               WHERE expiration = %s
+                              AND price_date = %s
                               AND bs_implied_vol IS NOT NULL
                               ))::int;'''
 
-            args = [date]
+            args = [date, target_date]
             try:
                 with psycopg2.connect(**conn_params) as conn:
                     with conn.cursor() as cur:
@@ -670,7 +670,6 @@ class thetadata_options_scrape_EOD:
         for date in active_dates:
             self.pull_data_and_calc_black_scholes_imp_vol(ticker, target_date, date, conn_params)
 
-
         return
     
     #Pulls options expiration list from database
@@ -679,6 +678,115 @@ class thetadata_options_scrape_EOD:
     #Takes this data, formats it into the correct format
     #feeds it to the different volatility surface models
     def recreate_options_surface_from_database(self):
+
+        return
+
+    def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,\
+                                            option_type, conn_params):
+
+        #load data from database
+
+        sql_query = '''SELECT expiration, strike, bid, ask, volume, bs_implied_vol 
+                       FROM options WHERE price_date = %s 
+                       AND ticker = %s
+                       AND option_type = %s'''
+        
+        
+        args = [target_date, ticker, option_type]
+
+        stock_price_query = '''SELECT close FROM stock_data WHERE date = %s AND ticker = %s'''
+
+        stock_args = [target_date, ticker]
+
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                df = pd.read_sql_query(sql=sql_query,con=conn,params=args)
+                with conn.cursor() as cur:
+                    cur.execute(stock_price_query, stock_args)
+                    stock_price = cur.fetchone()[0]
+                    print(stock_price)
+        except Exception as e:
+            print(e)
+
+        last_stock_price = stock_price
+
+        lower_strike = last_stock_price*low_strike_coef
+        high_strike = last_stock_price*high_str_coef
+
+        log_moneyness_arr = []
+        maturities = []
+        implied_vols_arr = []
+
+
+        # split into subgroup df's per expiration date
+        grouped_df = df.groupby('expiration')
+
+        for group_name, group_df in grouped_df:
+            string_date = dt.datetime.strftime(group_name, "%Y-%m-%d")
+            days_to_exp = self.date_calculator.num_dates_to_expir(string_date)
+
+            df_mask = (~group_df['bs_implied_vol'].isna()) & \
+                        (group_df['bs_implied_vol'] > 0) & \
+                        (group_df['bs_implied_vol'] <= 2.0) & \
+                        (group_df['strike'] >= lower_strike) & \
+                        (group_df['strike'] <= high_strike) & \
+                        (group_df['bid'] > 0) & (df['ask'] > 0) & \
+                        (group_df['volume'] > 0)
+            
+            strikes = group_df.loc[df_mask,'strike'].values
+            maturity = days_to_exp
+            implied_vols = group_df.loc[df_mask, 'bs_implied_vol'].values
+
+            if len(strikes) == 0:
+                continue
+
+            log_moneyness = np.log(strikes/last_stock_price)
+            log_moneyness_arr.extend(log_moneyness)
+            maturities.extend([maturity]*len(strikes))
+            implied_vols_arr.extend(implied_vols)
+
+        log_moneyness_arr = np.array(log_moneyness_arr)
+        maturities = np.array(maturities)
+        implied_vols_arr = np.array(implied_vols_arr)
+
+        if len(log_moneyness_arr) == 0:
+            print("no dp avaiable for plotting")
+            return
+        
+        logm_grid = np.linspace(log_moneyness_arr.min(),log_moneyness_arr.max(),50)
+        maturity_grid = np.linspace(maturities.min(),maturities.max(), 50)
+
+        M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
+
+        IV_grid = griddata(
+            points = (maturities, log_moneyness_arr),
+            values = implied_vols_arr,
+            xi = (M_grid, LM_grid),
+            method = 'linear'
+        )
+
+        fig = go.Figure(data = [go.Surface(
+            x = M_grid,
+            y = LM_grid,
+            z = IV_grid,
+            colorscale= 'Viridis',
+            colorbar = dict(title = "Implied Volatility")
+        )])
+        
+        fig.update_layout(
+            title = f"Implied Vol Surface (Log-Moneyness) for {ticker}",
+            scene=dict(
+            xaxis_title='Days to Expiration',
+            yaxis_title='Log-Moneyness ln(K/S)',
+            zaxis_title='Implied Volatility',
+        ),
+        autosize=True,
+        width=800,
+        height=700)
+
+        fig.show()
+
 
         return
 
@@ -762,7 +870,7 @@ def main():
 
     
 
-    target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
+    target_date = dt.datetime.strptime('2026-02-12', '%Y-%m-%d')
     expiration_date = "2026-12-18"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
 
@@ -777,6 +885,7 @@ def main():
     #thetadata_test.pull_data_and_calc_black_scholes_imp_vol("AAPL", target_date, expiration_date, conn_params)
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
     thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params)
+    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'cubic','CALL', conn_params)
 
 
     '''
