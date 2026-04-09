@@ -13,6 +13,7 @@ import os
 import psycopg2
 import time
 from numba import njit, prange
+import requests
 import httpx
 import io
 from datetime import date, timedelta
@@ -187,8 +188,7 @@ class black_scholes_implied_volatility:
 
 
 
-
-class options_chain:
+class y_finance_options_chain:
     
     def __init__(self, ticker, method,number_of_layers, steps, call_or_put):
         self.ticker = ticker
@@ -197,59 +197,19 @@ class options_chain:
         self.number_of_layers = number_of_layers
         self.call_or_put = call_or_put
         self.calculate_date_object = calculate_dates()
+        self.black_scholes = black_scholes_implied_volatility()
         self.fetch_options_data(self.ticker)
 
-    def vega(self, stock_price, time_to_expiration, cont_div_yield, d_1):
-        vega = stock_price*np.exp(-1*cont_div_yield*time_to_expiration)*1/np.sqrt(2*np.pi)*np.exp(-1*(d_1**2)/2)*np.sqrt(time_to_expiration)
-        return vega
-
-    def black_scholes_call_option(self, stock_price, contin_div_yield, time_to_expiration,d_1, d_2, strike_price , risk_free_rate):
-        price = stock_price*np.exp(-contin_div_yield*time_to_expiration)*norm.cdf(d_1) - strike_price*np.exp(-risk_free_rate*time_to_expiration)*norm.cdf(d_2)
-        return price
     
-    def black_scholes_put_option(self, stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate):
-        price = strike_price*np.exp(-1*risk_free_rate*time_to_expiration)*norm.cdf(-1*d_2) - stock_price*np.exp(-1*contin_div_yield*time_to_expiration)*norm.cdf(-1*d_1)
-        return price
-
-    def d_1(self, strike_price, stock_price, risk_free_rate, cont_div_yield, sigma, time_to_expiration):
-        d_1 = (np.log(stock_price/strike_price)+(risk_free_rate - cont_div_yield + (sigma**2)/2)*time_to_expiration)/(sigma*np.sqrt(time_to_expiration))
-        return d_1
-
-    def d_2(self, d_1, time_to_expiration, sigma):
-        d2 = d_1 - sigma*np.sqrt(time_to_expiration)
-        return d2
-    
-    def newton_raphson_method_black_scholes(self, epsilon,stock_price, option_price,risk_free_rate, contin_div_yield, time_to_expiration, strike_price, bs_price_func):
-        sigma = 0.8
-        black_scholes_cost = 1
-        market_cost = 0
-        max_iter = 400
-        count = 0
-        bs_price_func = bs_price_func
-        while (np.abs(black_scholes_cost - market_cost) > epsilon) and count< max_iter:
-
-            d_1 = self.d_1(strike_price, stock_price, risk_free_rate,contin_div_yield,sigma,time_to_expiration)
-            d_2 = self.d_2(d_1, time_to_expiration, sigma)
-            black_scholes_cost = bs_price_func(stock_price, contin_div_yield, time_to_expiration, d_1, d_2, strike_price, risk_free_rate)
-            market_cost = option_price
-            vega = self.vega(stock_price, time_to_expiration, contin_div_yield, d_1)
-
-            if abs(vega) < 1e-8:
-                break
-            sigma = sigma - (black_scholes_cost - market_cost)/(vega)
-
-            count += 1
-        return sigma
-    
-    def calc_implied_volatility(self,number_of_layers):
+    def calc_implied_volatility(self):
         if self.method == 'Black Scholes':
             if self.call_or_put == "call":
-                bs_price_func = self.black_scholes_call_option
+                bs_price_func = self.black_scholes.black_scholes_call_option
             if self.call_or_put == "put":
-                bs_price_func = self.black_scholes_put_option
+                bs_price_func = self.black_scholes.black_scholes_put_option
             for key in self.options_chains_dict.keys():
                 date_fraction = self.calculate_date_object.dates_to_expiration_fraction(key)
-                self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
+                self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
                                                                                                                          self.options_chains_dict[key]['midpoint'],\
                                                                                                                             self.risk_free,\
                                                                                                                                 self.dividend_yield,\
@@ -326,7 +286,7 @@ class options_chain:
         else:
             self.dividend_yield = 0
 
-        self.calc_implied_volatility(self.number_of_layers)
+        self.calc_implied_volatility()
 
 
 
@@ -427,7 +387,9 @@ class thetadata_options_scrape_EOD:
 
 
     #for single ticker/expiration date, pulls all options data for a specific date and stores into database
-    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params):
+    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params):        
+        #since expiration dates includes all expiration dates that have ever existed for options,
+        # we need to filter dates that are not relevant on the target date.
         BASE_URL = "http://127.0.0.1:25503/v3"
         PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
 
@@ -482,7 +444,7 @@ class thetadata_options_scrape_EOD:
 
 
     def pull_options_data_from_database_per_expiration(self, ticker, target_date, expiration_date, conn_params):
-
+        print("here")
         #extract options data from database
         sql_query = '''SELECT ticker, strike, midpoint, expiration, price_date, option_type
                        FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
@@ -546,7 +508,7 @@ class thetadata_options_scrape_EOD:
 
     #calculates and stores implied vol
     def black_scholes_calculation(self, options_dataframe, conn_params):
-
+        print("here")
         def call_or_put(arg_string):
             return self.black_scholes.call_or_put_method[arg_string]
         
@@ -579,9 +541,11 @@ class thetadata_options_scrape_EOD:
             print(row)'''
         
 
-        #clean IV values to remove non-convergent numbers and replace with None.
+        #clean IV values to remove non-convergent numbers and replace with 0.
         options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
-                                                                  (options_dataframe['implied_vol']>4), None)
+                                                                  (options_dataframe['implied_vol']>4), 0)
+        
+        print(options_dataframe['implied_vol'])
         
         #Store in database
         sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
@@ -602,8 +566,10 @@ class thetadata_options_scrape_EOD:
         except Exception as e:
             print(e)
 
+
+        '''
         #check to see if inserted properly
-        sql_query = '''SELECT bs_implied_vol FROM options'''
+        sql_query = 'SELECT bs_implied_vol FROM options'
 
         try:
             with psycopg2.connect(**conn_params) as conn:
@@ -617,8 +583,9 @@ class thetadata_options_scrape_EOD:
         for row in results:
             print(row)
         
+        return'''
+        del options_dataframe
         return
-
 
 
 
@@ -639,34 +606,70 @@ class thetadata_options_scrape_EOD:
 
         return dates_tuple
     
-    #scrape daily interestrate data
+
+    #scrapes data from API for a list of expirations, ignores invalid expiration dates and stores data in database
     def scrape_data_interest_rate_data(self):
         return
     
     #Given a target date, pulls expiration data through the available options chain expirations
-    #,pulling data from API and storing in the database
-    def iterate_through_expirations(self, ticker, target_date, conn_params):
-        
+    #pulling data from API and storing in the database
 
-        sql_query = '''SELECT (ticker, price_date, strike, option_type, bid, ask, midpoint) '''
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(retrieve_dates, [ticker])
-                    dates_tuple = cur.fetchall()[0]
-        except Exception as e:
-            print(e)
+    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params):
+        #pull the list of expiration dates from the database
 
+        expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
+        # filter dates beyond target date
+        # dates are filtered with all dates > cutoff included. Since this is EOD data, I am not including
+        # the target day. We only want options contracts expiring afterwards.
 
+        expiration_list = [date for date in expiration_list if date > target_date.date()]
 
-        #iterate through the list of dates
-        #check if date is in database
-        dates_tuple = self.pull_expiration_list_from_database(ticker,conn_params)
+        #for date in expiration_list, check if it's in the database
+        #if it's not in the database, query the API
+        #if it's not in the API, continue to the next date
 
+        active_expirations = []
+        previous_expirations = []
 
-        #if date is not in database, pull from API and put it in database
+        for date in expiration_list:
 
-        #if 
+            exists_query = '''SELECT (EXISTS ( SELECT 1 
+                              FROM options
+                              WHERE expiration = %s
+                              AND bs_implied_vol IS NOT NULL
+                              ))::int;'''
+
+            args = [date]
+            try:
+                with psycopg2.connect(**conn_params) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(exists_query, args)
+                        results = cur.fetchall()[0][0]
+            except Exception as e:
+                print(f"DB Error: {e}")
+
+            #explicit do nothing on 1, we already have data no need to pull more
+            if results == 1:
+                previous_expirations.append(date)
+                print(date, 1)
+            #If result = 0, we need to pull data from the API
+            if results == 0:
+                try:
+                    self.options_api_pull_per_exp_date(ticker, target_date, date, conn_params)
+                    active_expirations.append(date)
+                    print(date, 0)
+                except:
+                    print(date, "not in API")
+        return [previous_expirations, active_expirations]
+    
+    def calc_options_surface_for_date(self, ticker, target_date, conn_params):
+
+        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params)
+
+        active_dates = [dt.datetime.strftime(date,"%Y-%m-%d") for date in active_dates]
+        for date in active_dates:
+            self.pull_data_and_calc_black_scholes_imp_vol(ticker, target_date, date, conn_params)
+
 
         return
     
@@ -678,6 +681,7 @@ class thetadata_options_scrape_EOD:
     def recreate_options_surface_from_database(self):
 
         return
+
 
     #Reads Pandas 
     def pull_options_data_from_database(self, ticker, target_date ):
@@ -761,24 +765,30 @@ def main():
     target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
     expiration_date = "2026-12-18"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
+
+
     thetadata_test.get_expiration_list_options_ticker('AAPL',conn_params)
-    thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
+    #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''
     
-    thetadata_test.pull_data_and_calc_black_scholes_imp_vol("AAPL", target_date, expiration_date, conn_params)
+    #thetadata_test.pull_data_and_calc_black_scholes_imp_vol("AAPL", target_date, expiration_date, conn_params)
+    #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
+    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params)
 
-    call_bin_options = options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
-    call_put_options = options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
-    call_options_scholes = options_chain("BBWI", "Black Scholes",None,None,"call")
-    put_options_scholes = options_chain("BBWI", "Black Scholes", None, None, "put")
+
+    '''
+    call_bin_options = y_finance_options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
+    call_put_options = y_finance_options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
+    call_options_scholes = y_finance_options_chain("BBWI", "Black Scholes",None,None,"call")
+    put_options_scholes = y_finance_options_chain("BBWI", "Black Scholes", None, None, "put")
 
     call_bin_options.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
     call_options_scholes.plot_imp_vol_surface()
-    put_options_scholes.plot_imp_vol_surface()
+    put_options_scholes.plot_imp_vol_surface()'''
 
 if __name__ == "__main__":
     main()

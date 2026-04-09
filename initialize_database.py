@@ -154,6 +154,10 @@ def initialize_general_market_data_table(conn_params):
 
     return
 
+def calculate_dividend_yield(conn_params):
+
+    return
+
 
 
 def store_interest_rates_in_db(conn_params):
