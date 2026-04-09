@@ -498,31 +498,31 @@ class thetadata_options_scrape_EOD:
 
         return df
     
-    def pull_data_and_calc_black_scholes_imp_vol(self, ticker, target_date, expiration_date, conn_params ):
+    def pull_data_and_calc_iv(self, ticker, target_date, expiration_date, conn_params, calculation_type ):
         options_data = self.pull_options_data_from_database_per_expiration( ticker, target_date, expiration_date, conn_params)
         
-        self.black_scholes_calculation(options_data, conn_params)
+        self.iv_calculation(options_data, conn_params, calculation_type)
 
         return
     
 
     #calculates and stores implied vol
-    def black_scholes_calculation(self, options_dataframe, conn_params):
+    def iv_calculation(self, options_dataframe, conn_params, calculation_type = "Black Scholes"):
         def call_or_put(arg_string):
             return self.black_scholes.call_or_put_method[arg_string]
         
         options_dataframe['risk_free'] = options_dataframe['risk_free']/100
 
         options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
-
-        options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
-                                        (1e-5, options_dataframe['stock_price'],\
-                                        options_dataframe['midpoint'],\
-                                        options_dataframe['risk_free'],\
-                                        options_dataframe['dividend_yield'],\
-                                        options_dataframe['date_fraction'],\
-                                        options_dataframe['strike'],\
-                                        options_dataframe['call_or_put_func'])
+        if calculation_type == "Black Scholes":
+            options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
+                                            (1e-5, options_dataframe['stock_price'],\
+                                            options_dataframe['midpoint'],\
+                                            options_dataframe['risk_free'],\
+                                            options_dataframe['dividend_yield'],\
+                                            options_dataframe['date_fraction'],\
+                                            options_dataframe['strike'],\
+                                            options_dataframe['call_or_put_func'])
         
 
 
@@ -542,7 +542,7 @@ class thetadata_options_scrape_EOD:
 
         #clean IV values to remove non-convergent numbers and replace with 0.
         options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
-                                                                  (options_dataframe['implied_vol']>4), 0)
+                                                                  (options_dataframe['implied_vol']>10), 0)
         
         
         #Store in database
@@ -590,6 +590,7 @@ class thetadata_options_scrape_EOD:
     
 
     def pull_expiration_list_from_database(self,ticker,conn_params):
+
 
         retrieve_dates = '''SELECT dates from expiration_series WHERE ticker = %s; '''
 
@@ -662,13 +663,16 @@ class thetadata_options_scrape_EOD:
                     print(date, "not in API")
         return [previous_expirations, active_expirations]
     
-    def calc_options_surface_for_date(self, ticker, target_date, conn_params):
+    def calc_options_surface_for_date(self, ticker, target_date, conn_params, calculation_type, override_db = False):
 
         previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params)
 
+        previous_dates = [dt.datetime.strftime(date, "%Y-%m-%d") for date in previous_dates]
         active_dates = [dt.datetime.strftime(date,"%Y-%m-%d") for date in active_dates]
+        if override_db == True:
+            active_dates = previous_dates + active_dates
         for date in active_dates:
-            self.pull_data_and_calc_black_scholes_imp_vol(ticker, target_date, date, conn_params)
+            self.pull_data_and_calc_iv(ticker, target_date, date, conn_params, calculation_type)
 
         return
     
@@ -870,7 +874,7 @@ def main():
 
     
 
-    target_date = dt.datetime.strptime('2026-02-12', '%Y-%m-%d')
+    target_date = dt.datetime.strptime('2026-02-13', '%Y-%m-%d')
     expiration_date = "2026-12-18"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
 
@@ -882,9 +886,8 @@ def main():
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''
     
-    #thetadata_test.pull_data_and_calc_black_scholes_imp_vol("AAPL", target_date, expiration_date, conn_params)
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
-    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params)
+    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Black Scholes")
     thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'cubic','CALL', conn_params)
 
 
