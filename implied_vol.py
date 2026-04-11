@@ -24,8 +24,7 @@ load_dotenv()
 
 class binomial_tree_vectorized():
 
-    def __init__(self, strike_price, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend,call_or_put):
-        self.strike_price = strike_price
+    def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend,call_or_put):
         self.number_of_layers = number_of_layers
         self.initial_stock_price = initial_stock_price
         self.time_to_expiration = time_to_expiration
@@ -67,7 +66,7 @@ class binomial_tree_vectorized():
     #builds out the tree
     #Uses 2d numpy array to create pricing array
     def pricing_forward_pass(self,sigma, strike):
-        call_or_put = self.call_or_put
+        call_or_put = self.call_or_put.lower()
         up_factor, down_factor = self.define_time_segment(sigma)
         number_of_layers = self.number_of_layers
         prob = self.calculate_probability(up_factor,down_factor)
@@ -102,6 +101,20 @@ class binomial_tree_vectorized():
             return (np.exp((self.interest_rate-self.dividend) * self.delta_t) - d) / (u - d)
         except ZeroDivisionError:
             raise ValueError("Division by zero in probability calculation (u == d).")
+        
+    def vectorized_brentq_wrapper(self,sigma_low,sigma_high,strike_price,midpoint, xtol=1e-8, rtol=1e-8, maxiter=100):
+        def brentq_objective(sigma):
+            return self.vectorization_of_forward_pass(sigma,strike_price) - midpoint
+
+        try:
+            #start = time.perf_counter()
+            result = brentq(brentq_objective, sigma_low, sigma_high, xtol=1e-8, rtol=1e-8, maxiter=100)
+            #stop = time.perf_counter()
+            #print("time brentq",stop-start)
+            return result
+        except ValueError:
+            return np.nan
+
     
 class calculate_dates:
 
@@ -224,13 +237,12 @@ class y_finance_options_chain:
                 for key in self.options_chains_dict.keys():
                     dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key)
                     self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
-                    self.tree = binomial_tree_vectorized(self.options_chains_dict[key]['strike'],\
-                                             self.number_of_layers,self.last_stock_price,\
+                    self.tree = binomial_tree_vectorized(self.number_of_layers,self.last_stock_price,\
                                                 self.risk_free, dates_to_expiration,\
                                                     self.dividend_yield,\
                                                         self.call_or_put)
                                                         
-                    vec_func = np.vectorize(self.vectorized_brentq_wrapper, otypes=[float])
+                    vec_func = np.vectorize(self.tree.vectorized_brentq_wrapper, otypes=[float])
                     self.options_chains_dict[key]['calcImpliedVol'] = vec_func(
                         0.01,
                         5,
@@ -240,23 +252,10 @@ class y_finance_options_chain:
                     #self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.vectorized_brentq_wrapper)(0.01,2, self.options_chains_dict[key]['strike'],\
                                                                                                                   #self.options_chains_dict[key]['midpoint'])
   
-        end_time = time.perf_counter()
         return
     
    
-    def vectorized_brentq_wrapper(self,sigma_low,sigma_high,strike_price,midpoint, xtol=1e-8, rtol=1e-8, maxiter=100):
-        def brentq_objective(sigma):
-            return self.tree.vectorization_of_forward_pass(sigma,strike_price) - midpoint
-
-        try:
-            #start = time.perf_counter()
-            result = brentq(brentq_objective, sigma_low, sigma_high, xtol=1e-8, rtol=1e-8, maxiter=100)
-            #stop = time.perf_counter()
-            #print("time brentq",stop-start)
-            return result
-        except ValueError:
-            return np.nan
-    
+   
     def fetch_options_data(self, ticker):
         self.ticker = yf.Ticker(ticker)
         expiration_dates = self.ticker.options
@@ -444,7 +443,6 @@ class thetadata_options_scrape_EOD:
 
 
     def pull_options_data_from_database_per_expiration(self, ticker, target_date, expiration_date, conn_params):
-        print("here")
         #extract options data from database
         sql_query = '''SELECT ticker, strike, midpoint, expiration, price_date, option_type
                        FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
@@ -492,6 +490,8 @@ class thetadata_options_scrape_EOD:
         #converting expiration date to date fraction and broadcasting to pandas dataframe
         date_fraction = self.date_calculator.dates_to_expiration_fraction(expiration_date)
         df["date_fraction"] = date_fraction
+        days_to_expiration = self.date_calculator.dates_to_expiration_days(expiration_date)
+        df['days_to_expir'] = days_to_expiration
 
         #going to replace with real dividend yield, but need to calculate in database to handle it. 
         df['dividend_yield'] = 1/100
@@ -507,7 +507,7 @@ class thetadata_options_scrape_EOD:
     
 
     #calculates and stores implied vol
-    def iv_calculation(self, options_dataframe, conn_params, calculation_type = "Black Scholes"):
+    def iv_calculation(self, options_dataframe, conn_params, calculation_type = "Black Scholes", number_of_layers = 100):
         def call_or_put(arg_string):
             return self.black_scholes.call_or_put_method[arg_string]
         
@@ -525,6 +525,26 @@ class thetadata_options_scrape_EOD:
                                             options_dataframe['call_or_put_func'])
         
 
+        if calculation_type == "Binomial Tree":
+            stock_price = options_dataframe['stock_price'].iloc[-1]
+            interest_rate = options_dataframe['risk_free'].iloc[-1]
+            stock_dividend_yield = options_dataframe['dividend_yield'].iloc[-1]
+            days_to_expiration = options_dataframe['days_to_expir'].iloc[-1]
+            call_tree = binomial_tree_vectorized(number_of_layers, stock_price, interest_rate, days_to_expiration, stock_dividend_yield,"CALL")
+            put_tree = binomial_tree_vectorized(number_of_layers, stock_price, interest_rate, days_to_expiration, stock_dividend_yield,"PUT")
+
+            #creating pandas masks
+            is_call = options_dataframe['option_type'] == 'CALL'
+            is_put = options_dataframe['option_type'] == 'PUT'
+            
+            
+            cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+            options_dataframe.loc[is_call, 'implied_vol'] = cal_vec_func(0.01, 5, options_dataframe.loc[is_call, 'strike'].values, options_dataframe.loc[is_call, 'midpoint'].values)     
+            put_vec_func = np.vectorize(put_tree.vectorized_brentq_wrapper, otypes=[float])
+            options_dataframe.loc[is_put, 'implied_vol'] = put_vec_func(0.01, 5, options_dataframe.loc[is_put, 'strike'].values, options_dataframe.loc[is_put, 'midpoint'].values)
+            del call_tree
+            del put_tree
+
 
         #Check values to see if it looks good. 
         '''
@@ -539,19 +559,28 @@ class thetadata_options_scrape_EOD:
         for row in put_df[['strike','implied_vol']].itertuples():
             print(row)'''
         
-
+        
         #clean IV values to remove non-convergent numbers and replace with 0.
         options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
                                                                   (options_dataframe['implied_vol']>10), 0)
         
         
         #Store in database
-        sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
-                       VALUES (%s, %s, %s, %s, %s, %s)
-                       ON CONFLICT (ticker, expiration, price_date, strike, option_type)
-                       DO UPDATE SET
-                       bs_implied_vol = EXCLUDED.bs_implied_vol'''
+        if calculation_type == "Black Scholes":
+            sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (ticker, expiration, price_date, strike, option_type)
+                        DO UPDATE SET
+                        bs_implied_vol = EXCLUDED.bs_implied_vol'''
         
+        if calculation_type == "Binomial Tree":
+            sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bin_imp_vol) 
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (ticker, expiration, price_date, strike, option_type)
+                        DO UPDATE SET
+                        bin_imp_vol = EXCLUDED.bin_imp_vol'''
+
+            
         columns = ['ticker', 'expiration', 'price_date', 'strike', 'option_type', 'implied_vol']
 
         pd_generator = options_dataframe[columns].itertuples(index = False, name = None)
@@ -614,7 +643,7 @@ class thetadata_options_scrape_EOD:
     #Given a target date, pulls expiration data through the available options chain expirations
     #pulling data from API and storing in the database
 
-    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params):
+    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params, calculation_type):
         #pull the list of expiration dates from the database
 
         expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
@@ -632,13 +661,20 @@ class thetadata_options_scrape_EOD:
         previous_expirations = []
 
         for date in expiration_list:
-
-            exists_query = '''SELECT (EXISTS ( SELECT 1 
-                              FROM options
-                              WHERE expiration = %s
-                              AND price_date = %s
-                              AND bs_implied_vol IS NOT NULL
-                              ))::int;'''
+            if calculation_type == "Black Scholes":
+                exists_query = '''SELECT (EXISTS ( SELECT 1 
+                                FROM options
+                                WHERE expiration = %s
+                                AND price_date = %s
+                                AND bs_implied_vol IS NOT NULL
+                                ))::int;'''
+            if calculation_type == "Binomial Tree":
+                exists_query = '''SELECT (EXISTS ( SELECT 1 
+                                FROM options
+                                WHERE expiration = %s
+                                AND price_date = %s
+                                AND bin_imp_vol IS NOT NULL
+                                ))::int;'''
 
             args = [date, target_date]
             try:
@@ -665,13 +701,24 @@ class thetadata_options_scrape_EOD:
     
     def calc_options_surface_for_date(self, ticker, target_date, conn_params, calculation_type, override_db = False):
 
-        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params)
+        #pulls all possible expiration dates from database
+        #Filters expirations before target date
+        #Checks if these already exist in database
+        #If they don't exist, tries to pull the data from the API
+        #If data is available in API, stores in database
+        #Returns list of expiration dates, containing those which are already in the database and those which are not in the database
+        #Can be further improved to remove some redundant Api calls (when you want to override implied vol, but don't need to pull the data.)
+        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params, calculation_type)
 
+        #formatting datetypes to become strings, to match requirements for date module
         previous_dates = [dt.datetime.strftime(date, "%Y-%m-%d") for date in previous_dates]
         active_dates = [dt.datetime.strftime(date,"%Y-%m-%d") for date in active_dates]
+
+        # if override is true, calculates new Implied vols for all dates.
         if override_db == True:
             active_dates = previous_dates + active_dates
         for date in active_dates:
+            #Calculates IVs and stores in database, depending on which calculation method is being used.
             self.pull_data_and_calc_iv(ticker, target_date, date, conn_params, calculation_type)
 
         return
@@ -686,14 +733,20 @@ class thetadata_options_scrape_EOD:
         return
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,\
-                                            option_type, conn_params):
+                                            option_type, conn_params, calculation_type):
 
         #load data from database
-
-        sql_query = '''SELECT expiration, strike, bid, ask, volume, bs_implied_vol 
-                       FROM options WHERE price_date = %s 
-                       AND ticker = %s
-                       AND option_type = %s'''
+        if calculation_type == "Black Scholes":
+            sql_query = '''SELECT expiration, strike, bid, ask, volume, bs_implied_vol AS implied_volatility
+                        FROM options WHERE price_date = %s 
+                        AND ticker = %s
+                        AND option_type = %s'''
+            
+        if calculation_type == "Binomial Tree":
+            sql_query = '''SELECT expiration, strike, bid, ask, volume, bin_imp_vol AS implied_volatility
+                        FROM options WHERE price_date = %s 
+                        AND ticker = %s
+                        AND option_type = %s'''
         
         
         args = [target_date, ticker, option_type]
@@ -709,9 +762,10 @@ class thetadata_options_scrape_EOD:
                 with conn.cursor() as cur:
                     cur.execute(stock_price_query, stock_args)
                     stock_price = cur.fetchone()[0]
-                    print(stock_price)
         except Exception as e:
             print(e)
+
+            
 
         last_stock_price = stock_price
 
@@ -730,17 +784,20 @@ class thetadata_options_scrape_EOD:
             string_date = dt.datetime.strftime(group_name, "%Y-%m-%d")
             days_to_exp = self.date_calculator.num_dates_to_expir(string_date)
 
-            df_mask = (~group_df['bs_implied_vol'].isna()) & \
-                        (group_df['bs_implied_vol'] > 0) & \
-                        (group_df['bs_implied_vol'] <= 2.0) & \
+            
+            df_mask = (~group_df['implied_volatility'].isna()) & \
+                        (group_df['implied_volatility'] > 0) & \
+                        (group_df['implied_volatility'] <= 5.0) & \
                         (group_df['strike'] >= lower_strike) & \
                         (group_df['strike'] <= high_strike) & \
-                        (group_df['bid'] > 0) & (df['ask'] > 0) & \
+                        (group_df['bid'] > 0) & (group_df['ask'] > 0) & \
                         (group_df['volume'] > 0)
+            
+            #df_mask = (~group_df['implied_volatility'].isna())
             
             strikes = group_df.loc[df_mask,'strike'].values
             maturity = days_to_exp
-            implied_vols = group_df.loc[df_mask, 'bs_implied_vol'].values
+            implied_vols = group_df.loc[df_mask, 'implied_volatility'].values
 
             if len(strikes) == 0:
                 continue
@@ -767,7 +824,7 @@ class thetadata_options_scrape_EOD:
             points = (maturities, log_moneyness_arr),
             values = implied_vols_arr,
             xi = (M_grid, LM_grid),
-            method = 'linear'
+            method = interp_method
         )
 
         fig = go.Figure(data = [go.Surface(
@@ -874,8 +931,8 @@ def main():
 
     
 
-    target_date = dt.datetime.strptime('2026-02-13', '%Y-%m-%d')
-    expiration_date = "2026-12-18"
+    target_date = dt.datetime.strptime('2026-02-20', '%Y-%m-%d')
+    expiration_date = "2026-12-19"
     thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
 
 
@@ -887,8 +944,13 @@ def main():
                                                                                 conn_params)'''
     
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
-    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Black Scholes")
-    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'cubic','CALL', conn_params)
+    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Binomial Tree", override_db=True)
+    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Black Scholes", override_db=True)
+    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
+
+    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
 
 
     '''
@@ -900,7 +962,8 @@ def main():
     call_bin_options.plot_imp_vol_surface()
     call_put_options.plot_imp_vol_surface()
     call_options_scholes.plot_imp_vol_surface()
-    put_options_scholes.plot_imp_vol_surface()'''
+    put_options_scholes.plot_imp_vol_surface()
+    '''
 
 if __name__ == "__main__":
     main()
