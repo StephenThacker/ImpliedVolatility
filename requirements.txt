@@ -5,3 +5,8 @@ yfinance
 openpyxl
 holidays
 requests
+httpx
+numpy
+scipy
+numba
+plotly

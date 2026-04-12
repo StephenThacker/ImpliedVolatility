@@ -19,6 +19,7 @@ import io
 from datetime import date, timedelta
 import csv
 import holidays
+from initialize_database import S_and_P_tickers
 
 load_dotenv()
 
@@ -118,20 +119,23 @@ class binomial_tree_vectorized():
     
 class calculate_dates:
 
-    def dates_to_expiration_fraction(self, expiration_date):
+    def dates_to_expiration_fraction(self, expiration_date, target_date):
         expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
+        target_date = dt.datetime.strptime(target_date, "%Y-%m-%d").date()
+        days_to_expiration = (expiration_date - target_date).days
         fraction_of_days = days_to_expiration/365
         return fraction_of_days
 
-    def dates_to_expiration_days(self,expiration_date):
+    def dates_to_expiration_days(self,expiration_date, target_date):
+        target_date = dt.datetime.strptime(target_date, "%Y-%m-%d").date()
         expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
+        days_to_expiration = (expiration_date - target_date).days
         return days_to_expiration
 
-    def num_dates_to_expir(self,expiration_date):
+    def num_dates_to_expir(self,expiration_date, target_date):
+        target_date = dt.datetime.strptime(target_date, "%Y-%m-%d").date()
         expiration_date = dt.datetime.strptime(expiration_date, "%Y-%m-%d").date()
-        days_to_expiration = (expiration_date - dt.date.today()).days
+        days_to_expiration = (expiration_date - target_date).days
         return days_to_expiration
 
     def check_if_day_is_trading_day(self, potential_day: dt ):
@@ -221,7 +225,8 @@ class y_finance_options_chain:
             if self.call_or_put == "put":
                 bs_price_func = self.black_scholes.black_scholes_put_option
             for key in self.options_chains_dict.keys():
-                date_fraction = self.calculate_date_object.dates_to_expiration_fraction(key)
+                today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
+                date_fraction = self.calculate_date_object.dates_to_expiration_fraction(key, today)
                 self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
                                                                                                                          self.options_chains_dict[key]['midpoint'],\
                                                                                                                             self.risk_free,\
@@ -229,14 +234,16 @@ class y_finance_options_chain:
                                                                                                                                     date_fraction,\
                                                                                                                                         self.options_chains_dict[key]['strike'],\
                                                                                                                                             bs_price_func)
-                self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
+                
+                self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key, today)
         #key is the contract expiration date
         #dates to expiration, is the dates the contract has to expire
         start_time = time.perf_counter()
         if self.method == "BinTree Continuous Deriv":
                 for key in self.options_chains_dict.keys():
-                    dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key)
-                    self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key)
+                    today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
+                    dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key, today)
+                    self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key, today)
                     self.tree = binomial_tree_vectorized(self.number_of_layers,self.last_stock_price,\
                                                 self.risk_free, dates_to_expiration,\
                                                     self.dividend_yield,\
@@ -300,9 +307,10 @@ class y_finance_options_chain:
         log_moneyness_all = []
         maturities_all = []
         implied_vols_all = []
+        today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
 
         for exp_date, df in self.options_chains_dict.items():
-            days_to_exp = self.calculate_date_object.num_dates_to_expir(exp_date)
+            days_to_exp = self.calculate_date_object.num_dates_to_expir(exp_date, today)
             if days_to_exp > max_days_to_exp or days_to_exp < 0:
                 continue
 
@@ -372,17 +380,13 @@ class y_finance_options_chain:
 
 #target date is assummed to be a datetime object
 class thetadata_options_scrape_EOD:
-    def __init__(self, ticker,target_date):
+    def __init__(self):
         self.BASE_URL = "http://127.0.0.1:25503/v3"
         self.PARAMS = {}
-        self.ticker = ticker
-        self.target_date = target_date
         #might want to refactor calculate dates to be an instance passed to the class, to avoid redundant memory drag
         #If I'm going to pull data for like 500 tickers
         self.date_calculator = calculate_dates()
         self.black_scholes = black_scholes_implied_volatility()
-        if self.date_calculator.check_if_day_is_trading_day(target_date) == False:
-            raise ValueError(f"Target date {target_date} is a weekend or market holiday. Cannot scrape options data.")
 
 
     #for single ticker/expiration date, pulls all options data for a specific date and stores into database
@@ -390,15 +394,19 @@ class thetadata_options_scrape_EOD:
         #since expiration dates includes all expiration dates that have ever existed for options,
         # we need to filter dates that are not relevant on the target date.
         BASE_URL = "http://127.0.0.1:25503/v3"
-        PARAMS = {'start_date': self.target_date,'end_date': self.target_date,'symbol': self.ticker,'expiration':expiration_date }
+        expiration = dt.datetime.strftime(expiration_date, "%Y-%m-%d")
+        PARAMS = {'start_date': target_date,'end_date': target_date,'symbol': ticker,'expiration':expiration }
 
-        start_date = dt.datetime.strftime(self.target_date,"%Y%m%d") 
-        end_date = dt.datetime.strftime(self.target_date,"%Y%m%d") 
+        start_date = dt.datetime.strftime(target_date,"%Y%m%d") 
+        end_date = dt.datetime.strftime(target_date,"%Y%m%d") 
 
         PARAMS['start_date'] = start_date
         PARAMS['end_date'] = end_date
 
         url = BASE_URL + '/option/history/eod'
+
+        print("params")
+        print(PARAMS)
 
         with httpx.stream("GET", url, params = PARAMS, timeout=60) as response:
             response.raise_for_status()
@@ -457,7 +465,6 @@ class thetadata_options_scrape_EOD:
         except Exception as e:
             print(e)
 
-
         #pulling risk free rate from database and broadcasting to pandas dataframe
         sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
         args = [target_date]
@@ -469,8 +476,24 @@ class thetadata_options_scrape_EOD:
                     results = cur.fetchall()
         except Exception as e:
             print(e)
-            
+        
         df["risk_free"] = results[0][0]
+        df['risk_free'] = df['risk_free']/100
+
+        sql_query = '''SELECT div_yield_per FROM stock_data WHERE ticker = %s AND date = %s'''
+        args = [ticker, target_date]
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_query,args)
+                    results = cur.fetchall()
+        except Exception as e:
+            print(e)
+        
+        df['dividend_yield'] = results[0][0]/100
+          
+
 
 
         #pulling EOD stock data and broadcasting to pandas dataframe
@@ -484,17 +507,19 @@ class thetadata_options_scrape_EOD:
         except Exception as e:
             print(e)
 
+        if df.empty:
+            print("dataframe is empty")
+            return
 
         df["stock_price"] = results[0][0]
 
         #converting expiration date to date fraction and broadcasting to pandas dataframe
-        date_fraction = self.date_calculator.dates_to_expiration_fraction(expiration_date)
+        target_date_str = dt.datetime.strftime(target_date, "%Y-%m-%d")
+        date_fraction = self.date_calculator.dates_to_expiration_fraction(expiration_date, target_date_str)
         df["date_fraction"] = date_fraction
-        days_to_expiration = self.date_calculator.dates_to_expiration_days(expiration_date)
+        days_to_expiration = self.date_calculator.dates_to_expiration_days(expiration_date, target_date_str)
         df['days_to_expir'] = days_to_expiration
 
-        #going to replace with real dividend yield, but need to calculate in database to handle it. 
-        df['dividend_yield'] = 1/100
 
         return df
     
@@ -511,7 +536,7 @@ class thetadata_options_scrape_EOD:
         def call_or_put(arg_string):
             return self.black_scholes.call_or_put_method[arg_string]
         
-        options_dataframe['risk_free'] = options_dataframe['risk_free']/100
+
 
         options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
         if calculation_type == "Black Scholes":
@@ -526,6 +551,7 @@ class thetadata_options_scrape_EOD:
         
 
         if calculation_type == "Binomial Tree":
+            print(options_dataframe['stock_price'])
             stock_price = options_dataframe['stock_price'].iloc[-1]
             interest_rate = options_dataframe['risk_free'].iloc[-1]
             stock_dividend_yield = options_dataframe['dividend_yield'].iloc[-1]
@@ -629,6 +655,7 @@ class thetadata_options_scrape_EOD:
                 with conn.cursor() as cur:
                     cur.execute(retrieve_dates, [ticker])
                     dates_tuple = cur.fetchall()[0]
+                    return dates_tuple
         except Exception as e:
             print(e)
 
@@ -665,6 +692,7 @@ class thetadata_options_scrape_EOD:
                 exists_query = '''SELECT (EXISTS ( SELECT 1 
                                 FROM options
                                 WHERE expiration = %s
+                                AND ticker = %s
                                 AND price_date = %s
                                 AND bs_implied_vol IS NOT NULL
                                 ))::int;'''
@@ -672,11 +700,12 @@ class thetadata_options_scrape_EOD:
                 exists_query = '''SELECT (EXISTS ( SELECT 1 
                                 FROM options
                                 WHERE expiration = %s
+                                AND ticker = %s
                                 AND price_date = %s
                                 AND bin_imp_vol IS NOT NULL
                                 ))::int;'''
 
-            args = [date, target_date]
+            args = [date, ticker, target_date]
             try:
                 with psycopg2.connect(**conn_params) as conn:
                     with conn.cursor() as cur:
@@ -688,14 +717,14 @@ class thetadata_options_scrape_EOD:
             #explicit do nothing on 1, we already have data no need to pull more
             if results == 1:
                 previous_expirations.append(date)
-                print(date, 1)
             #If result = 0, we need to pull data from the API
             if results == 0:
                 try:
                     self.options_api_pull_per_exp_date(ticker, target_date, date, conn_params)
                     active_expirations.append(date)
                     print(date, 0)
-                except:
+                except Exception as e:
+                    print(e)
                     print(date, "not in API")
         return [previous_expirations, active_expirations]
     
@@ -782,12 +811,13 @@ class thetadata_options_scrape_EOD:
 
         for group_name, group_df in grouped_df:
             string_date = dt.datetime.strftime(group_name, "%Y-%m-%d")
-            days_to_exp = self.date_calculator.num_dates_to_expir(string_date)
+            target_date_str = dt.datetime.strftime(target_date, "%Y-%m-%d")
+            days_to_exp = self.date_calculator.num_dates_to_expir(string_date, target_date_str)
 
             
             df_mask = (~group_df['implied_volatility'].isna()) & \
                         (group_df['implied_volatility'] > 0) & \
-                        (group_df['implied_volatility'] <= 5.0) & \
+                        (group_df['implied_volatility'] <= 1.0) & \
                         (group_df['strike'] >= lower_strike) & \
                         (group_df['strike'] <= high_strike) & \
                         (group_df['bid'] > 0) & (group_df['ask'] > 0) & \
@@ -853,42 +883,34 @@ class thetadata_options_scrape_EOD:
 
 
     #Reads Pandas 
-    def pull_options_data_from_database(self, ticker, target_date ):
-        return
 
     #need to update this to store in database
-    def get_expiration_list_options_ticker(self, ticker, conn_params):
-        BASE_URL = "http://127.0.0.1:25503/v3"
-        params = {'symbol': ticker}
 
-        url = BASE_URL + '/option/list/expirations'
+    
+    def iterate_through_S_and_P_imp_vol(start_date, end_date,conn_params):
+        tickers = S_and_P_tickers(conn_params)
 
-        data_to_store = []
-        with httpx.stream("GET", url, params = params, timeout=60) as response:
-            response.raise_for_status()
-            iter_lines = response.iter_lines()
-            #skip header
-            next(iter_lines)
-            for line in iter_lines:
-                for row in csv.reader(io.StringIO(line)):
-                    date = dt.datetime.strptime(row[1], '%Y-%m-%d').date()
-                    data_to_store.append(date)
-                
-        insert_sql = '''INSERT INTO expiration_series (
-        ticker , dates)
-                    VALUES (%s, %s)
-                    ON CONFLICT DO NOTHING;
-        '''
+        ticker_iterable = tickers.copy()
+        exists_query= '''SELECT DISTINCT ticker
+                         FROM stock_data
+                         WHERE ticker = ANY(%s)
+                         AND close IS NOT NULL;
+                         '''
 
+        #purging stock tickers that don't data
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
-                    arguments = (ticker, data_to_store)
-                    cur.execute(insert_sql,arguments)
+                    for ticker in ticker_iterable:
+                        arguments = [ticker]
+                        cur.execute(exists_query,arguments)
+                        exists = cur.fetchone()[0]
+                        if not exists:
+                            tickers.remove(ticker)
         except Exception as e:
             print(e)
 
-        return
+
 
 
 
@@ -931,12 +953,11 @@ def main():
 
     
 
-    target_date = dt.datetime.strptime('2026-02-20', '%Y-%m-%d')
+    target_date = dt.datetime.strptime('2025-04-09', '%Y-%m-%d')
     expiration_date = "2026-12-19"
-    thetadata_test = thetadata_options_scrape_EOD('AAPL', target_date)
+    thetadata_test = thetadata_options_scrape_EOD()
 
 
-    thetadata_test.get_expiration_list_options_ticker('AAPL',conn_params)
     #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
@@ -944,13 +965,13 @@ def main():
                                                                                 conn_params)'''
     
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
-    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Binomial Tree", override_db=True)
-    thetadata_test.calc_options_surface_for_date('AAPL',target_date,conn_params,"Black Scholes", override_db=True)
-    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
+    thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Binomial Tree")
+    thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Black Scholes")
+    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
 
-    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('AAPL', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
+    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
 
 
     '''

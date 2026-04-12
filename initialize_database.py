@@ -14,6 +14,12 @@ from typing import Dict
 import holidays
 import requests
 from psycopg2 import sql
+import httpx
+import csv
+import io
+
+
+
 
 #Contains "one-time load" scripts related to initalizing database tables or transferring CSV/API historical data to databases
 #i.e., pull interest rates from CSV file and store in database
@@ -565,6 +571,23 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
         time.sleep(0.5)
     return
 
+
+def S_and_P_tickers(conn_params):
+
+    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL 
+                      ORDER By date DESC 
+                      LIMIT 1'''
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            df = pd.read_sql_query(ticker_query, conn)
+
+    except Exception as e:
+        print(e)
+    
+    tickers = df.iloc[-1].tolist()[0]
+    return tickers
+
 def nightly_store_stock_price_for_S_and_P(conn_params):
     todays_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
     iterate_through_S_and_P_store_stock_values(conn_params,todays_date,todays_date)
@@ -615,7 +638,50 @@ def store_nightly_interest_rate(conn_params):
         return
 
     return
+def get_expiration_list_options_ticker(ticker, conn_params):
+    BASE_URL = "http://127.0.0.1:25503/v3"
+    params = {'symbol': ticker}
 
+    url = BASE_URL + '/option/list/expirations'
+
+    data_to_store = []
+    with httpx.stream("GET", url, params = params, timeout=60) as response:
+        response.raise_for_status()
+        iter_lines = response.iter_lines()
+        #skip header
+        next(iter_lines)
+        for line in iter_lines:
+            for row in csv.reader(io.StringIO(line)):
+                date = dt.datetime.strptime(row[1], '%Y-%m-%d').date()
+                data_to_store.append(date)
+            
+    insert_sql = '''INSERT INTO expiration_series (
+    ticker , dates)
+                VALUES (%s, %s)
+                ON CONFLICT DO NOTHING;
+    '''
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                arguments = (ticker, data_to_store)
+                cur.execute(insert_sql,arguments)
+    except Exception as e:
+        print(e)
+
+    return
+
+def load_expiration_dates_all_tickers(conn_params):
+    tickers = S_and_P_tickers(conn_params)
+    for ticker in tickers:
+        print("ticker", ticker)
+        try:
+            get_expiration_list_options_ticker(ticker, conn_params)
+            time.sleep(0.1)
+        except Exception as e:
+            print(e)
+
+    return
 
 def nightly_routine(conn_params):
     potential_day = dt.datetime.today().date()
@@ -630,6 +696,7 @@ def nightly_routine(conn_params):
         print("not a market day")
         return
     potential_day = dt.datetime.strftime(potential_day, "%Y-%m-%d")
+    load_expiration_dates_all_tickers(conn_params)
     store_nightly_interest_rate(conn_params)
     nightly_store_stock_price_for_S_and_P(conn_params)
     iterate_through_S_and_P_store_dividends(potential_day,potential_day,conn_params)
@@ -654,12 +721,14 @@ if __name__ == "__main__":
     #add_div_percentage_to_table(conn_params)
     #one_time_dividend_update(conn_params)
     #read_s_and_p_tickers_from_CSV(conn_params)
-    store_nightly_interest_rate(conn_params)
+    #load_expiration_dates_all_tickers(conn_params)
+    #store_nightly_interest_rate(conn_params)
     '''
     start_date = '2018-01-01'
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
     iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)'''
+    initalize_options_table(conn_params)
     #iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
     #iterate_through_S_and_P_store_stock_values(conn_params)
     #store_stock_price_history_yfinance('NVDA', conn_params )
