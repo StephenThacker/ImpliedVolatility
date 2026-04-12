@@ -11,6 +11,9 @@ import time
 import psycopg2.extras
 import numpy as np
 from typing import Dict
+import holidays
+import requests
+from psycopg2 import sql
 
 #Contains "one-time load" scripts related to initalizing database tables or transferring CSV/API historical data to databases
 #i.e., pull interest rates from CSV file and store in database
@@ -230,11 +233,6 @@ def initialize_general_market_data_table(conn_params):
 
     return
 
-def calculate_dividend_yield(conn_params):
-
-    return
-
-
 
 def store_interest_rates_in_db(conn_params):
     df = pd.read_excel(
@@ -259,6 +257,7 @@ def store_interest_rates_in_db(conn_params):
             with conn.cursor() as cur:
                 pandas_generator = df[cols].itertuples(index = False,name = None )
                 cur.executemany(insert_sql,pandas_generator)
+                cur.commit()
     except Exception as e:
         print(e)              
 
@@ -311,6 +310,7 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
             with conn.cursor() as cur:
                 cur.executemany(insert_sql,pandas_generator)
                 rows_affected = cur.rowcount
+                cur.commit()
     except Exception as e:
         print(f"Database error while storing dividends for {ticker}: {e}")
 
@@ -322,7 +322,7 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
     #dividends = stock.dividends.loc[date_start,date_end]"""
 
     #stores EOD stock price history for last 10 years for a single stock ticker
-def store_stock_price_history_yfinance(ticker, conn_params):
+def store_stock_price_history_yfinance(ticker,start_date = None, end_date = None, conn_params=None):
 
     stock = yf.Ticker(ticker)
     try:
@@ -334,13 +334,18 @@ def store_stock_price_history_yfinance(ticker, conn_params):
     if stock_price.empty:
         print("no data found")
         return
-    
+   
 
 
     df_data = {"ticker": ticker, "date": stock_price.index.date, "close": stock_price["Close"], "open": stock_price["Open"], \
                 "high": stock_price["High"],"low": stock_price["Low"], "volume": stock_price["Volume"]}
     
     df = pd.DataFrame(df_data)
+
+    if start_date is not None and end_date is not None:
+        start_date = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+        df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
 
     df = df.where(pd.notnull(df),None)
 
@@ -391,8 +396,9 @@ def store_stock_price_history_yfinance(ticker, conn_params):
         print(e)"""
     
 
-def calculate_and_store_dividend_yields_database(ticker, conn_params):
+def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, conn_params):
 
+    #check database to make sure there is stock data
     exists_query= '''SELECT EXISTS (
                      SELECT 1 
                      FROM stock_data 
@@ -404,35 +410,85 @@ def calculate_and_store_dividend_yields_database(ticker, conn_params):
             with conn.cursor() as cur:
                 cur.execute(exists_query, (ticker,))
                 results =  cur.fetchone()[0]
-                if results == 0:
-                    print("no stock data for ticker")
-                    return
     except Exception as e:
         print("No data for ticker")
         return
+    
+    if results == 0:
+        print("no stock data for ticker")
+        return
 
+    start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date()
+    end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+    
 
-    sql_query = '''SELECT date, close, dividend FROM stock_data WHERE ticker = %s AND dividend IS NOT NULL
-                   AND dividend != 0 AND close IS NOT NULL'''
+    #pull stock data query
 
-    args = [ticker]
+    stock_data_query = '''SELECT date, close, dividend FROM stock_data WHERE ticker = %s
+                          AND date >= %s AND date <= %s AND
+                          close IS NOT NULL ORDER BY date ASC'''
+
+    args = [ticker, start_date_dt, end_date_dt]
 
     try:
         with psycopg2.connect(**conn_params) as conn:
-            df = pd.read_sql_query(sql_query,conn,params = args)
-            if df.empty ==True:
-                print("not enough dividend data to calculate rate")
-                return
-            
+            stock_df = pd.read_sql_query(stock_data_query, conn, params = args)
+
+    except Exception as e:
+        print(e)
+        return
+
+    stock_df['date'] = pd.to_datetime(stock_df['date'])
+
+    stock_df['dividend'] = stock_df['dividend'].fillna(0)
+
+    stock_df['div_sum'] = stock_df.rolling(window = '365D', on = 'date')['dividend'].sum()
+
+    stock_df['div_yield_per'] = (stock_df['div_sum']/stock_df['close'])
+    
+    stock_df['ticker'] = ticker
+
+    stock_df = stock_df[stock_df['div_yield_per']>0]
+
+    update_data = [(row.div_yield_per, row.ticker, row.date.date()) for row in stock_df.itertuples(index = False)]
+
+    update_query = '''UPDATE stock_data
+                      SET div_yield_per = %s
+                      WHERE ticker = %s
+                      AND date = %s'''
+    
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(update_query, update_data)
+            conn.commit()  # Ensure changes are saved
+        print(f"Successfully updated {len(update_data)} yield records for {ticker}.")
+    except Exception as e:
+        print(f"Database update failed for {ticker}: {e}")
+
+    
+    query_first = "SELECT date, div_yield_per FROM stock_data WHERE ticker = %s ORDER BY date ASC LIMIT 10;"
+    query_last = "SELECT date, div_yield_per FROM stock_data WHERE ticker = %s ORDER BY date DESC LIMIT 10;"
+
+    args_first =   [ticker]
+    args_second = [ticker]
+
+    try:
+            with psycopg2.connect(**conn_params) as conn:
+                df_first = pd.read_sql_query(query_first, conn, params=args_first)
+                
+                df_last = pd.read_sql_query(query_last, conn, params= args_second)
+
+                print(df_first)
+                
+                print(df_last.sort_values('date'))
+
     except Exception as e:
         print(e)
 
-    print(df.head())
-
     return
 
-
-def iterate_through_S_and_P_store_stock_values(conn_params):
+def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params):
 
     #load S&P tickers from database
     ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL'''
@@ -447,7 +503,29 @@ def iterate_through_S_and_P_store_stock_values(conn_params):
     tickers = df.iloc[-1].tolist()[0]
 
     for ticker in tickers:
-        store_stock_price_history_yfinance(ticker,conn_params=conn_params)
+        calculate_and_store_dividend_yields_database(ticker,start_date, end_date,conn_params=conn_params)
+        print(ticker)
+        #trying not to get rate limited by API
+        time.sleep(0.5)
+    return
+
+
+def iterate_through_S_and_P_store_stock_values(conn_params = None, start_date = None, end_date = None):
+
+    #load S&P tickers from database
+    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL'''
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            df = pd.read_sql_query(ticker_query, conn)
+
+    except Exception as e:
+        print(e)
+    
+    tickers = df.iloc[-1].tolist()[0]
+
+    for ticker in tickers:
+        store_stock_price_history_yfinance(ticker,start_date = None, end_date = None,conn_params=conn_params)
         print(ticker)
         #trying not to get rate limited by API
         time.sleep(0.5)
@@ -478,6 +556,78 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
         time.sleep(0.5)
     return
 
+def nightly_store_stock_price_for_S_and_P(conn_params):
+    todays_date = dt.datetime.strf(dt.datetime.today().date(), "%Y-%m-%d")
+    iterate_through_S_and_P_store_stock_values(conn_params,todays_date,todays_date)
+
+    return
+
+def store_nightly_interest_rate(conn_params):
+
+    url = (
+        "https://markets.newyorkfed.org/read"
+        "?productCode=50"
+        "&eventCodes=520"
+        "&limit=1"
+        "&startPosition=0"
+        "&sort=postDt:-1"
+        "&format=json"
+    )
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data.get("refRates"):
+            raise ValueError("No SOFR data returned")
+
+        latest = data["refRates"][0]
+        effective_date = dt.datetime.strptime(latest["effectiveDate"], "%Y-%m-%d")
+        rate = latest["percentRate"]
+
+        sql_insert = '''INSERT INTO market_data (date, risk_free_rate) VALUES (%s, %s)
+                         ON CONFLICT (date) DO UPDATE SET
+                         risk_free_rate = EXCLUDED.risk_free_rate'''
+        
+        args = [effective_date, rate]
+                        
+    except Exception as e:
+        print(e) 
+        return
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql_insert, args)
+
+    except Exception as e:
+        print(e)
+        return
+
+    return
+
+def nightly_update_dividends(conn_params):
+
+    return
+
+def nightly_routine(conn_params):
+    potential_day = dt.datetime.strf(dt.datetime.today().date(), "%Y-%m-%d")
+
+    if potential_day.weekday() >= 5:
+        print("not a market day")
+        return 
+        
+    nyse_holidays = holidays.financial_holidays('NYSE')
+
+    if potential_day in nyse_holidays:
+        print("not a market day")
+        return
+    store_nightly_interest_rate(conn_params)
+    nightly_store_stock_price_for_S_and_P(conn_params)
+
+    return
+
 
 
 
@@ -496,14 +646,17 @@ if __name__ == "__main__":
     #add_div_percentage_to_table(conn_params)
     #one_time_dividend_update(conn_params)
     #read_s_and_p_tickers_from_CSV(conn_params)
-    start_date = '2016-01-01'
+    store_nightly_interest_rate(conn_params)
+    '''
+    start_date = '2018-01-01'
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
-    iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
-    iterate_through_S_and_P_store_stock_values(conn_params)
+    iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)'''
+    #iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
+    #iterate_through_S_and_P_store_stock_values(conn_params)
     #store_stock_price_history_yfinance('NVDA', conn_params )
     #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)
-    #calculate_and_store_dividend_yields_database('NVDA', conn_params)
+    #calculate_and_store_dividend_yields_database('NVDA', start_date, end_date, conn_params)
     #target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
     #end_date = target_date + timedelta(days = 1)
 
