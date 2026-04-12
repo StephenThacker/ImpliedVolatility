@@ -257,7 +257,7 @@ def store_interest_rates_in_db(conn_params):
             with conn.cursor() as cur:
                 pandas_generator = df[cols].itertuples(index = False,name = None )
                 cur.executemany(insert_sql,pandas_generator)
-                cur.commit()
+            conn.commit()
     except Exception as e:
         print(e)              
 
@@ -270,11 +270,11 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
         dividends = stock.dividends
     except Exception as e:
         print(f"Error fetching dividends for {ticker}: {e}")
-        return 0
+        return 
     
     if dividends.empty:
-        print("no dividends")
-        return 0
+        print("no dividends at all in stock")
+        return 
     
     dividends = dividends.copy()
     if dividends.index.tz is not None:
@@ -284,9 +284,14 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
         start_date = pd.to_datetime(date_start)
         end_date = pd.to_datetime(date_end)
         dividends = dividends.loc[start_date:end_date]
+        if dividends.empty:
+            print("no dividends within specific date range")
+            return 
+        
+
     except Exception as e:
         print(f"Date filtering error for {ticker} ({date_start} to {date_end}): {e}")
-        return 0
+        return 
     
     data = {
         'ticker': ticker,
@@ -310,7 +315,7 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
             with conn.cursor() as cur:
                 cur.executemany(insert_sql,pandas_generator)
                 rows_affected = cur.rowcount
-                cur.commit()
+            conn.commit()
     except Exception as e:
         print(f"Database error while storing dividends for {ticker}: {e}")
 
@@ -370,6 +375,7 @@ def store_stock_price_history_yfinance(ticker,start_date = None, end_date = None
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 psycopg2.extras.execute_values(cur,insert_sql,pandas_generator,page_size = 1000)
+            conn.commit()
     except Exception as e:
         print(e)
 
@@ -418,7 +424,8 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
         print("no stock data for ticker")
         return
 
-    start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date()
+    start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date() - timedelta(days=400)
+
     end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
     
 
@@ -461,7 +468,7 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 cur.executemany(update_query, update_data)
-            conn.commit()  # Ensure changes are saved
+            conn.commit()
         print(f"Successfully updated {len(update_data)} yield records for {ticker}.")
     except Exception as e:
         print(f"Database update failed for {ticker}: {e}")
@@ -491,7 +498,8 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
 def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params):
 
     #load S&P tickers from database
-    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL'''
+    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL
+                      ORDER BY date DESC LIMIT 1'''
 
     try:
         with psycopg2.connect(**conn_params) as conn:
@@ -513,7 +521,8 @@ def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_para
 def iterate_through_S_and_P_store_stock_values(conn_params = None, start_date = None, end_date = None):
 
     #load S&P tickers from database
-    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL'''
+    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL
+                      ORDER BY date DESC LIMIT 1'''
 
     try:
         with psycopg2.connect(**conn_params) as conn:
@@ -557,7 +566,7 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
     return
 
 def nightly_store_stock_price_for_S_and_P(conn_params):
-    todays_date = dt.datetime.strf(dt.datetime.today().date(), "%Y-%m-%d")
+    todays_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
     iterate_through_S_and_P_store_stock_values(conn_params,todays_date,todays_date)
 
     return
@@ -600,19 +609,16 @@ def store_nightly_interest_rate(conn_params):
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 cur.execute(sql_insert, args)
-
+            conn.commit()
     except Exception as e:
         print(e)
         return
 
     return
 
-def nightly_update_dividends(conn_params):
-
-    return
 
 def nightly_routine(conn_params):
-    potential_day = dt.datetime.strf(dt.datetime.today().date(), "%Y-%m-%d")
+    potential_day = dt.datetime.today().date()
 
     if potential_day.weekday() >= 5:
         print("not a market day")
@@ -623,9 +629,11 @@ def nightly_routine(conn_params):
     if potential_day in nyse_holidays:
         print("not a market day")
         return
+    potential_day = dt.datetime.strftime(potential_day, "%Y-%m-%d")
     store_nightly_interest_rate(conn_params)
     nightly_store_stock_price_for_S_and_P(conn_params)
-
+    iterate_through_S_and_P_store_dividends(potential_day,potential_day,conn_params)
+    iterate_through_S_and_P_store_dividend_yields(potential_day,potential_day,conn_params)
     return
 
 

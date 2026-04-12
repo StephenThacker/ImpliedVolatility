@@ -1,0 +1,7 @@
+python-dotenv
+psycopg2-binary
+pandas
+yfinance
+openpyxl
+holidays
+requests
