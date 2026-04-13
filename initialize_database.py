@@ -242,7 +242,7 @@ def initialize_general_market_data_table(conn_params):
 
 def store_interest_rates_in_db(conn_params):
     df = pd.read_excel(
-        r'C:\Users\steph\Desktop\Coding\Github Quant Finance\CSV_FILES\Interest_Rates_DB_old.xlsx',
+        r'C:\Users\steph\Desktop\Coding\Github Quant Finance\CSV_FILES\Interest_Rates_DB.xlsx',
         sheet_name='Results')
 
     insert_sql = '''INSERT INTO market_data  (date , risk_free_rate)\

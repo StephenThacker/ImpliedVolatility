@@ -19,7 +19,7 @@ import io
 from datetime import date, timedelta
 import csv
 import holidays
-from initialize_database import S_and_P_tickers
+from utils import S_and_P_tickers
 
 load_dotenv()
 
@@ -673,12 +673,10 @@ class thetadata_options_scrape_EOD:
     #Given a target date, pulls expiration data through the available options chain expirations
     #pulling data from API and storing in the database
 
-    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params, calculation_type):
+    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params, calculation_type,base_url = "http://127.0.0.1:25503/v3"):
         #pull the list of expiration dates from the database
 
         expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
-        print(ticker, target_date, calculation_type)
-        print(expiration_list)
         # filter dates beyond target date
         # dates are filtered with all dates > cutoff included. Since this is EOD data, I am not including
         # the target day. We only want options contracts expiring afterwards.
@@ -725,7 +723,7 @@ class thetadata_options_scrape_EOD:
             #If result = 0, we need to pull data from the API
             if results == 0:
                 try:
-                    self.options_api_pull_per_exp_date(ticker, target_date, date, conn_params)
+                    self.options_api_pull_per_exp_date(ticker, target_date, date, conn_params, base_url=base_url)
                     active_expirations.append(date)
                     print(date, 0)
                 except Exception as e:
@@ -733,7 +731,7 @@ class thetadata_options_scrape_EOD:
                     print(date, "not in API")
         return [previous_expirations, active_expirations]
     
-    def calc_options_surface_for_date(self, ticker, target_date, conn_params, calculation_type, override_db = False):
+    def calc_options_surface_for_date(self, ticker, target_date, conn_params, calculation_type, override_db = False, base_url = "http://127.0.0.1:25503/v3"):
 
         #pulls all possible expiration dates from database
         #Filters expirations before target date
@@ -742,7 +740,7 @@ class thetadata_options_scrape_EOD:
         #If data is available in API, stores in database
         #Returns list of expiration dates, containing those which are already in the database and those which are not in the database
         #Can be further improved to remove some redundant Api calls (when you want to override implied vol, but don't need to pull the data.)
-        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params, calculation_type)
+        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params, calculation_type, base_url=base_url)
 
         #formatting datetypes to become strings, to match requirements for date module
         previous_dates = [dt.datetime.strftime(date, "%Y-%m-%d") for date in previous_dates]
@@ -943,6 +941,23 @@ def testing_polygon_api(ticker,client):
         print(contract.ticker)
     
     return """
+
+def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()-dt.timedelta(days=4)):
+    conn_params = {
+        "host": "db",
+        "database": os.getenv("DB_NAME"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": "5432"
+    }
+
+    docker_base_url = "http://host.docker.internal:25503/v3"
+    theta_nightly = thetadata_options_scrape_EOD()
+    for ticker in ticker_list:
+        theta_nightly.calc_options_surface_for_date(ticker,target_date,conn_params,"Binomial Tree", base_url=docker_base_url)
+        theta_nightly.calc_options_surface_for_date(ticker,target_date,conn_params,"Black Scholes", base_url=docker_base_url)
+
+    return
     
 
 
@@ -961,7 +976,7 @@ def main():
 
     
 
-    target_date = dt.datetime.strptime('2025-04-07', '%Y-%m-%d')
+    target_date = dt.datetime.strptime('2025-04-10', '%Y-%m-%d')
     expiration_date = "2026-12-19"
     thetadata_test = thetadata_options_scrape_EOD()
 
@@ -973,13 +988,13 @@ def main():
                                                                                 conn_params)'''
     
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
-    thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Binomial Tree")
-    thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Black Scholes")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
+    thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Binomial Tree")
+    thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Black Scholes")
+    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
 
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
+    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
+    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
 
 
     '''

@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 from initialize_database import nightly_routine
+from implied_vol import theta_data_nightly_routine
 
 load_dotenv()
 
@@ -12,4 +13,6 @@ if __name__ == "__main__":
         "password": os.getenv("DB_PASSWORD"),
         "port": "5432"
     }
+    tickers = ['AAPL', 'PLTR', 'CVX']
+    theta_data_nightly_routine(tickers)
     nightly_routine(conn_params)

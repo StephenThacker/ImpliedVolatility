@@ -1,0 +1,3 @@
+#keeping some useful commands here.
+
+docker exec -it nightlyupdater python /app/nightly_update.py
