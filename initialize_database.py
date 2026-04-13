@@ -17,7 +17,7 @@ from psycopg2 import sql
 import httpx
 import csv
 import io
-
+from utils import S_and_P_tickers
 
 
 
@@ -26,38 +26,6 @@ import io
 
 load_dotenv()
 
-
-def read_s_and_p_tickers_from_CSV(conn_params):
-
-    df = pd.read_csv(
-        r"C:\Users\steph\Desktop\Coding\Github Quant Finance\CSV_FILES\SP.csv")
-    
-    df = df['Symbol']
-    tickers = df.tolist()
-
-    alter_query = '''ALTER TABLE market_data
-                     ADD COLUMN IF NOT EXISTS S_and_P_tickers TEXT[] '''
-
-
-    today  = dt.datetime.today().date()
-    store_csv_query = '''INSERT INTO market_data (date, S_and_P_tickers) VALUES (%s, %s)
-                         ON CONFLICT (date) DO UPDATE SET
-                         S_and_P_tickers = EXCLUDED.S_and_P_tickers'''
-    
-    args = [today, tickers]
-
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            with conn.cursor() as cur:
-                cur.execute(alter_query)
-                cur.execute(store_csv_query, args)
-                conn.commit()
-
-                
-    except Exception as e:
-        print(e) 
-
-    return
 
 
 def add_div_percentage_to_table(conn_params):
@@ -240,34 +208,6 @@ def initialize_general_market_data_table(conn_params):
     return
 
 
-def store_interest_rates_in_db(conn_params):
-    df = pd.read_excel(
-        r'C:\Users\steph\Desktop\Coding\Github Quant Finance\CSV_FILES\Interest_Rates_DB.xlsx',
-        sheet_name='Results')
-
-    insert_sql = '''INSERT INTO market_data  (date , risk_free_rate)\
-                    VALUES ( %s, %s)
-                    ON CONFLICT DO NOTHING;
-    '''
-
-    df["Effective Date"] = pd.to_datetime(df["Effective Date"]).dt.date
-
-    cols = ['Effective Date', 'Rate (%)']
-
-    df = df[cols].where(df[cols].notnull(),None)
-
-    pandas_generator = df[cols].itertuples(index=False, name=None)
-
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            with conn.cursor() as cur:
-                pandas_generator = df[cols].itertuples(index = False,name = None )
-                cur.executemany(insert_sql,pandas_generator)
-            conn.commit()
-    except Exception as e:
-        print(e)              
-
-    return
 
 #stores stock dividends from date range into database
 def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
@@ -572,21 +512,7 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
     return
 
 
-def S_and_P_tickers(conn_params):
 
-    ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL 
-                      ORDER By date DESC 
-                      LIMIT 1'''
-
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            df = pd.read_sql_query(ticker_query, conn)
-
-    except Exception as e:
-        print(e)
-    
-    tickers = df.iloc[-1].tolist()[0]
-    return tickers
 
 def nightly_store_stock_price_for_S_and_P(conn_params):
     todays_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
@@ -684,6 +610,7 @@ def load_expiration_dates_all_tickers(conn_params):
     return
 
 def nightly_routine(conn_params):
+    print("here")
     potential_day = dt.datetime.today().date()
 
     if potential_day.weekday() >= 5:
@@ -720,15 +647,17 @@ if __name__ == "__main__":
     #initialize_stock_data_table(conn_params)
     #add_div_percentage_to_table(conn_params)
     #one_time_dividend_update(conn_params)
-    #read_s_and_p_tickers_from_CSV(conn_params)
     #load_expiration_dates_all_tickers(conn_params)
     #store_nightly_interest_rate(conn_params)
-    '''
+    
     start_date = '2018-01-01'
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
-    iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)'''
-    initalize_options_table(conn_params)
+    #iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)
+
+
+    iterate_through_S_and_P_store_dividends(start_date,end_date, conn_params)
+    iterate_through_S_and_P_store_dividend_yields(start_date,end_date, conn_params)
     #iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
     #iterate_through_S_and_P_store_stock_values(conn_params)
     #store_stock_price_history_yfinance('NVDA', conn_params )

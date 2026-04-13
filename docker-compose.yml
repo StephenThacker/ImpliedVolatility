@@ -10,21 +10,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Change the end of this line from /data to just /postgresql
       - postgres_data:/var/lib/postgresql
-
-  updater:                         
-    build: .
-    container_name: nightly_updater
-    restart: always
-    depends_on:
-      - db
-    environment:
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-    volumes:
-      - .:/app                     
-      - /var/log/cron.log:/var/log/cron.log
 
 volumes:
   postgres_data:

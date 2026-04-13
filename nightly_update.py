@@ -4,6 +4,7 @@ from initialize_database import nightly_routine
 
 load_dotenv()
 
+
 if __name__ == "__main__":
     conn_params = {
         "host": "db",

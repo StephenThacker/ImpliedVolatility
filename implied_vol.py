@@ -19,9 +19,12 @@ import io
 from datetime import date, timedelta
 import csv
 import holidays
-from initialize_database import S_and_P_tickers
+from utils import S_and_P_tickers
 
 load_dotenv()
+
+
+
 
 class binomial_tree_vectorized():
 
@@ -452,6 +455,8 @@ class thetadata_options_scrape_EOD:
 
     def pull_options_data_from_database_per_expiration(self, ticker, target_date, expiration_date, conn_params):
         #extract options data from database
+        if isinstance(target_date, dt.datetime):
+            target_date = target_date.date()
         sql_query = '''SELECT ticker, strike, midpoint, expiration, price_date, option_type
                        FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
                        ORDER BY strike ASC'''
@@ -467,6 +472,7 @@ class thetadata_options_scrape_EOD:
 
         #pulling risk free rate from database and broadcasting to pandas dataframe
         sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
+        
         args = [target_date]
 
         try:
@@ -476,7 +482,8 @@ class thetadata_options_scrape_EOD:
                     results = cur.fetchall()
         except Exception as e:
             print(e)
-        
+
+        print(results)
         df["risk_free"] = results[0][0]
         df['risk_free'] = df['risk_free']/100
 
@@ -763,7 +770,8 @@ class thetadata_options_scrape_EOD:
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,\
                                             option_type, conn_params, calculation_type):
-
+        if isinstance(target_date, dt.datetime):
+            target_date = target_date.date()
         #load data from database
         if calculation_type == "Black Scholes":
             sql_query = '''SELECT expiration, strike, bid, ask, volume, bs_implied_vol AS implied_volatility
@@ -784,7 +792,7 @@ class thetadata_options_scrape_EOD:
 
         stock_args = [target_date, ticker]
 
-
+        print(target_date)
         try:
             with psycopg2.connect(**conn_params) as conn:
                 df = pd.read_sql_query(sql=sql_query,con=conn,params=args)
@@ -887,28 +895,60 @@ class thetadata_options_scrape_EOD:
     #need to update this to store in database
 
     
-    def iterate_through_S_and_P_imp_vol(start_date, end_date,conn_params):
-        tickers = S_and_P_tickers(conn_params)
+    def iterate_through_S_and_P_imp_vol(self, tickers, start_date_dt, end_date_dt, conn_params):
+        if type(tickers) == None:
+            tickers = S_and_P_tickers(conn_params)
+        
 
         ticker_iterable = tickers.copy()
         exists_query= '''SELECT DISTINCT ticker
                          FROM stock_data
-                         WHERE ticker = ANY(%s)
+                         WHERE ticker = %s
                          AND close IS NOT NULL;
                          '''
 
-        #purging stock tickers that don't data
+        #purging stock tickers that don't have stock data data
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
                     for ticker in ticker_iterable:
                         arguments = [ticker]
                         cur.execute(exists_query,arguments)
-                        exists = cur.fetchone()[0]
-                        if not exists:
+                        if cur.fetchone() is None:
                             tickers.remove(ticker)
         except Exception as e:
             print(e)
+
+        #start_date_dt = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+        #end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+
+        #Create date list for iteration
+        nyse_holidays = holidays.financial_holidays('NYSE')
+        date_list = []
+        indx = start_date_dt
+        while indx <= end_date_dt:
+            if indx.weekday() >= 5:
+                indx += timedelta(days=1)
+                continue
+
+            if indx in nyse_holidays:
+                indx += timedelta(days=1)
+                continue
+            date_list.append(indx)
+            indx += timedelta(days=1)
+
+        for date in date_list:
+            for ticker in tickers:
+                try:
+                    self.calc_options_surface_for_date(ticker,date,conn_params,"Binomial Tree")
+                    self.calc_options_surface_for_date(ticker,date,conn_params,"Black Scholes")
+                    #self.plot_options_surface_from_database(ticker, date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
+                    #self.plot_options_surface_from_database(ticker, date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
+                    #self.plot_options_surface_from_database(ticker, date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
+                    #self.plot_options_surface_from_database(ticker, date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
+                except Exception as e:
+                    print(e)
+
 
 
 
@@ -957,7 +997,16 @@ def main():
     expiration_date = "2026-12-19"
     thetadata_test = thetadata_options_scrape_EOD()
 
+    today_date = dt.datetime.today()
+    two_months_ago = today_date - timedelta(days=90)
 
+    #today_date = dt.datetime.strftime(today_date, "%Y-%m-%d")
+    #two_months_ago = dt.datetime.strftime(two_months_ago, "%Y-%m-%d")
+
+    ticker_list = ['ADBE', 'AMZN','PLTR', 'NVDA', 'BSX', 'CMG','DLTR', 'LULU', 'NOW', 'AMD']
+
+    thetadata_test.iterate_through_S_and_P_imp_vol(ticker_list, two_months_ago,today_date, conn_params)
+    
     #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
@@ -967,11 +1016,11 @@ def main():
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
     thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Binomial Tree")
     thetadata_test.calc_options_surface_for_date('CVX',target_date,conn_params,"Black Scholes")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
+    #thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
+    #thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
 
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
+    #thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
+    #thetadata_test.plot_options_surface_from_database('CVX', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
 
 
     '''
