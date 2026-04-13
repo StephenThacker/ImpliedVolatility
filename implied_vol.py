@@ -20,6 +20,7 @@ from datetime import date, timedelta
 import csv
 import holidays
 from utils import S_and_P_tickers
+import plotly
 
 load_dotenv()
 
@@ -765,7 +766,7 @@ class thetadata_options_scrape_EOD:
         return
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,\
-                                            option_type, conn_params, calculation_type):
+                                            option_type, conn_params, calculation_type, animate = False):
 
         if isinstance(target_date, dt.datetime):
             target_date = target_date.date()
@@ -823,7 +824,7 @@ class thetadata_options_scrape_EOD:
             
             df_mask = (~group_df['implied_volatility'].isna()) & \
                         (group_df['implied_volatility'] > 0) & \
-                        (group_df['implied_volatility'] <= 2.0) & \
+                        (group_df['implied_volatility'] <= 5.0) & \
                         (group_df['strike'] >= lower_strike) & \
                         (group_df['strike'] <= high_strike) & \
                         (group_df['bid'] > 0) & (group_df['ask'] > 0) & \
@@ -856,65 +857,173 @@ class thetadata_options_scrape_EOD:
 
         M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
 
+
         IV_grid = griddata(
             points = (maturities, log_moneyness_arr),
             values = implied_vols_arr,
             xi = (M_grid, LM_grid),
             method = interp_method
         )
+        if animate == False:
+            fig = go.Figure(data = [go.Surface(
+                x = M_grid,
+                y = LM_grid,
+                z = IV_grid,
+                colorscale= 'Viridis',
+                colorbar = dict(title = "Implied Volatility")
+            )])
+            
+            fig.update_layout(
+                title = f"Implied Vol Surface (Log-Moneyness) for {ticker}",
+                scene=dict(
+                xaxis_title='Days to Expiration',
+                yaxis_title='Log-Moneyness ln(K/S)',
+                zaxis_title='Implied Volatility',
+            ),
+            autosize=True,
+            width=800,
+            height=700)
 
-        fig = go.Figure(data = [go.Surface(
-            x = M_grid,
-            y = LM_grid,
-            z = IV_grid,
-            colorscale= 'Viridis',
-            colorbar = dict(title = "Implied Volatility")
-        )])
+            fig.show()
+
+        return [M_grid, LM_grid, IV_grid]
+    
+    def build_options_animation(self,ticker, start_date, end_date,low_strike_coef, high_str_coef, interp_method,\
+                                            option_type, conn_params, calculation_type):
+        nyse_holidays = holidays.financial_holidays('NYSE')
+        date_list = [] 
+        date_indx = start_date
+        while date_indx <= end_date:
+            if date_indx.weekday() >= 5:
+                date_indx = date_indx + timedelta(days = 1)
+                continue
         
-        fig.update_layout(
-            title = f"Implied Vol Surface (Log-Moneyness) for {ticker}",
-            scene=dict(
-            xaxis_title='Days to Expiration',
-            yaxis_title='Log-Moneyness ln(K/S)',
-            zaxis_title='Implied Volatility',
-        ),
-        autosize=True,
-        width=800,
-        height=700)
 
+
+            if date_indx in nyse_holidays:
+                date_indx = date_indx + timedelta(days = 1)
+                continue
+            date_list.append(date_indx)
+            date_indx = date_indx + timedelta(days = 1)
+
+        IV_surfaces =[]
+        frames = []
+        for date in date_list:
+            try:
+                M_grid, LM_grid, IV_grid = self.plot_options_surface_from_database(ticker,date, low_strike_coef, high_str_coef,interp_method,option_type,\
+                                                        conn_params, calculation_type, animate = True)
+            except Exception as e:
+                print("date missing for imp vol surface", e)
+                continue
+
+            IV_surfaces.append(IV_grid)
+            frame = go.Frame(
+                data=[go.Surface(
+                    x=M_grid,
+                    y=LM_grid,
+                    z=IV_grid,
+                    colorscale='Viridis',
+                    colorbar=dict(title='Implied Volatility')   # ← fixed typo
+                )],
+                name=date.strftime('%Y-%m-%d'),
+                layout=dict(
+                    title=f"{ticker} {option_type} {date.strftime('%Y-%m-%d')}"
+                )
+            )
+            frames.append(frame)
+        
+        fig = go.Figure(
+            data=[go.Surface(x=M_grid, y=LM_grid, z=IV_surfaces[0])],  
+            frames=frames                                             
+            )
+        
+
+        fig.update_layout(
+                    title=f"{ticker} {option_type} Implied Volatility Surface Animation",
+                    scene=dict(
+                        xaxis_title='Days to Expiration',
+                        yaxis_title='Log-Moneyness ln(K/S)',
+                        zaxis_title='Implied Volatility',
+                    ),
+                    updatemenus=[dict(
+                        type="buttons",
+                        showactive=False,
+                        buttons=[dict(
+                            label="Play",
+                            method="animate",
+                            args=[None, {
+                                "frame": {"duration": 600, "redraw": True},
+                                "fromcurrent": True,
+                                "transition": {"duration": 200}
+                            }]
+                        ),
+                        dict(
+                            label="Pause",
+                            method="animate",
+                            args=[[None], {
+                                "frame": {"duration": 0, "redraw": False},
+                                "mode": "immediate",
+                                "transition": {"duration": 0}
+                            }]
+                        )]
+                    )],
+                    sliders=[dict(
+                        steps=[dict(method='animate',
+                                    args=[[frame.name],
+                                        {"frame": {"duration": 300, "redraw": True},
+                                        "mode": "immediate"}],
+                                    label=frame.name) for frame in frames],
+                        transition={"duration": 300},
+                        x=0.1,         
+                        xanchor="left",
+                        y=0.05,      
+                        yanchor="bottom",
+                        currentvalue={"prefix": "Date: ", "visible": True}
+                    )]
+                )
+        
         fig.show()
+        return
+
+    def iterate_tickers(self, tickers, start_date, end_date, conn_params):
+        print("here")
+        date_indx = start_date
+        dates_list = [] 
+        while date_indx <= end_date:
+            dates_list.append(date_indx)
+            date_indx = date_indx + timedelta(days = 1)
+        for date in dates_list:
+            for ticker in tickers:
+                self.calc_options_surface_for_date(ticker, date, conn_params, "Binomial Tree")
+                self.calc_options_surface_for_date(ticker, date, conn_params, "Black Scholes")
 
 
         return
 
 
-    #Reads Pandas 
-
-    #need to update this to store in database
-
     
-    def iterate_through_S_and_P_imp_vol(start_date, end_date,conn_params):
-        tickers = S_and_P_tickers(conn_params)
+def iterate_through_S_and_P_imp_vol(start_date, end_date,conn_params):
+    tickers = S_and_P_tickers(conn_params)
 
-        ticker_iterable = tickers.copy()
-        exists_query= '''SELECT DISTINCT ticker
-                         FROM stock_data
-                         WHERE ticker = ANY(%s)
-                         AND close IS NOT NULL;
-                         '''
+    ticker_iterable = tickers.copy()
+    exists_query= '''SELECT DISTINCT ticker
+                        FROM stock_data
+                        WHERE ticker = ANY(%s)
+                        AND close IS NOT NULL;
+                        '''
 
-        #purging stock tickers that don't data
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    for ticker in ticker_iterable:
-                        arguments = [ticker]
-                        cur.execute(exists_query,arguments)
-                        exists = cur.fetchone()[0]
-                        if not exists:
-                            tickers.remove(ticker)
-        except Exception as e:
-            print(e)
+    #purging stock tickers that don't data
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                for ticker in ticker_iterable:
+                    arguments = [ticker]
+                    cur.execute(exists_query,arguments)
+                    exists = cur.fetchone()[0]
+                    if not exists:
+                        tickers.remove(ticker)
+    except Exception as e:
+        print(e)
 
 
 
@@ -942,7 +1051,7 @@ def testing_polygon_api(ticker,client):
     
     return """
 
-def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()-dt.timedelta(days=4)):
+def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
     conn_params = {
         "host": "db",
         "database": os.getenv("DB_NAME"),
@@ -984,17 +1093,27 @@ def main():
     #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
+    today = dt.datetime.today()
+    one_mo_ago = today - timedelta(days=30)
+    medium_date = one_mo_ago + timedelta(days= 20)
+
+    thetadata_test.build_options_animation('CVX', one_mo_ago, medium_date,0.2, 1.8,'linear',"PUT",conn_params,'Binomial Tree' )
+
+    #thetadata_test.iterate_tickers(['PLTR','CVX'], one_mo_ago,today, conn_params)
+
+
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''
     
     #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
+    '''
     thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Binomial Tree")
     thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Black Scholes")
     thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
     thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
 
     thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")
+    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")'''
 
 
     '''
