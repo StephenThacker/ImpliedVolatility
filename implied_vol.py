@@ -381,7 +381,6 @@ class y_finance_options_chain:
 #target date is assummed to be a datetime object
 class thetadata_options_scrape_EOD:
     def __init__(self):
-        self.BASE_URL = "http://127.0.0.1:25503/v3"
         self.PARAMS = {}
         #might want to refactor calculate dates to be an instance passed to the class, to avoid redundant memory drag
         #If I'm going to pull data for like 500 tickers
@@ -390,10 +389,10 @@ class thetadata_options_scrape_EOD:
 
 
     #for single ticker/expiration date, pulls all options data for a specific date and stores into database
-    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params):        
+    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params, base_url = "http://127.0.0.1:25503/v3"):        
         #since expiration dates includes all expiration dates that have ever existed for options,
         # we need to filter dates that are not relevant on the target date.
-        BASE_URL = "http://127.0.0.1:25503/v3"
+        BASE_URL = base_url
         expiration = dt.datetime.strftime(expiration_date, "%Y-%m-%d")
         PARAMS = {'start_date': target_date,'end_date': target_date,'symbol': ticker,'expiration':expiration }
 

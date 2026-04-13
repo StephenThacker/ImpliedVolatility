@@ -651,8 +651,8 @@ def store_nightly_interest_rate(conn_params):
         return
 
     return
-def get_expiration_list_options_ticker(ticker, conn_params):
-    BASE_URL = "http://127.0.0.1:25503/v3"
+def get_expiration_list_options_ticker(ticker, conn_params, base_url = "http://127.0.0.1:25503/v3" ):
+    BASE_URL = base_url
     params = {'symbol': ticker}
 
     url = BASE_URL + '/option/list/expirations'
@@ -684,12 +684,12 @@ def get_expiration_list_options_ticker(ticker, conn_params):
 
     return
 
-def load_expiration_dates_all_tickers(conn_params):
+def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:25503/v3"):
     tickers = S_and_P_tickers(conn_params)
     for ticker in tickers:
         print("ticker", ticker)
         try:
-            get_expiration_list_options_ticker(ticker, conn_params)
+            get_expiration_list_options_ticker(ticker, conn_params,base_url= "http://host.docker.internal:25503/v3")
             time.sleep(0.1)
         except Exception as e:
             print(e)
@@ -709,7 +709,7 @@ def nightly_routine(conn_params):
         print("not a market day")
         return
     potential_day = dt.datetime.strftime(potential_day, "%Y-%m-%d")
-    load_expiration_dates_all_tickers(conn_params)
+    load_expiration_dates_all_tickers(conn_params,"http://host.docker.internal:25503/v3")
     store_nightly_interest_rate(conn_params)
     nightly_store_stock_price_for_S_and_P(conn_params)
     iterate_through_S_and_P_store_dividends(potential_day,potential_day,conn_params)
