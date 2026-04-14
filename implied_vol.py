@@ -765,8 +765,10 @@ class thetadata_options_scrape_EOD:
 
         return
 
-    def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,\
-                                            option_type, conn_params, calculation_type, animate = False):
+    def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,
+                                                option_type, conn_params, calculation_type, animate=False,
+                                                fixed_logm_min=None, fixed_logm_max=None,
+                                                fixed_mat_min=None, fixed_mat_max=None):
 
         if isinstance(target_date, dt.datetime):
             target_date = target_date.date()
@@ -852,8 +854,11 @@ class thetadata_options_scrape_EOD:
             print("no dp avaiable for plotting")
             return
         
-        logm_grid = np.linspace(log_moneyness_arr.min(),log_moneyness_arr.max(),50)
-        maturity_grid = np.linspace(maturities.min(),maturities.max(), 50)
+        logm_grid = np.linspace(fixed_logm_min if fixed_logm_min is not None else log_moneyness_arr.min(),
+                                fixed_logm_max if fixed_logm_max is not None else log_moneyness_arr.max(), 50)
+        
+        maturity_grid = np.linspace(fixed_mat_min if fixed_mat_min is not None else maturities.min(),
+                                    fixed_mat_max if fixed_mat_max is not None else maturities.max(), 50)
 
         M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
 
@@ -887,7 +892,8 @@ class thetadata_options_scrape_EOD:
             fig.show()
 
         return [M_grid, LM_grid, IV_grid]
-    
+
+    '''
     def build_options_animation(self,ticker, start_date, end_date,low_strike_coef, high_str_coef, interp_method,\
                                             option_type, conn_params, calculation_type):
         nyse_holidays = holidays.financial_holidays('NYSE')
@@ -982,8 +988,126 @@ class thetadata_options_scrape_EOD:
                     )]
                 )
         
-        fig.show()
-        return
+        return fig'''
+
+    def build_options_animation(self, ticker, start_date, end_date, low_strike_coef, high_str_coef, interp_method,
+                                option_type, conn_params, calculation_type):
+        
+        nyse_holidays = holidays.financial_holidays('NYSE')
+        date_list = []
+        current = start_date
+        while current <= end_date:
+            if current.weekday() >= 5 or current in nyse_holidays:
+                current += timedelta(days=1)
+                continue
+            date_list.append(current)
+            current += timedelta(days=1)
+
+        # === COMPLETELY FIXED GRID FOR EVERY ANIMATION ===
+        FIXED_LOGM_MIN = -.2
+        FIXED_LOGM_MAX = 0.3
+        FIXED_MAT_MIN  = 0
+        FIXED_MAT_MAX  = 365
+        FIXED_Z_MIN    = 0.0
+        FIXED_Z_MAX    = 1.5
+
+        frames = []
+        for date in date_list:
+            try:
+                M_grid, LM_grid, IV_grid = self.plot_options_surface_from_database(
+                    ticker, date, low_strike_coef, high_str_coef, interp_method,
+                    option_type, conn_params, calculation_type, animate=True,
+                    fixed_logm_min=FIXED_LOGM_MIN,
+                    fixed_logm_max=FIXED_LOGM_MAX,
+                    fixed_mat_min=FIXED_MAT_MIN,
+                    fixed_mat_max=FIXED_MAT_MAX
+                )
+            except Exception as e:
+                print("date missing for imp vol surface", e)
+                continue
+
+            frame = go.Frame(
+                data=[go.Surface(
+                    x=M_grid,
+                    y=LM_grid,
+                    z=IV_grid,
+                    colorscale='Viridis',
+                    colorbar=dict(title='Implied Volatility'),
+                    cmin=FIXED_Z_MIN,          # lock color scale
+                    cmax=FIXED_Z_MAX
+                )],
+                name=date.strftime('%Y-%m-%d'),
+                layout=dict(                   # ← lock axes in EVERY frame
+                    scene=dict(
+                        xaxis=dict(range=[FIXED_MAT_MIN, FIXED_MAT_MAX]),
+                        yaxis=dict(range=[FIXED_LOGM_MIN, FIXED_LOGM_MAX]),
+                        zaxis=dict(range=[FIXED_Z_MIN, FIXED_Z_MAX]),
+                        camera=dict(
+                            eye=dict(x=1.7, y=1.7, z=1.1),
+                            up=dict(x=0, y=0, z=1),
+                            center=dict(x=0, y=0, z=0)
+                        )
+                    )
+                )
+            )
+            frames.append(frame)
+
+        if not frames:
+            print("No frames created")
+            return None
+
+        # Initial figure
+        fig = go.Figure(
+            data=[go.Surface(
+                x=frames[0].data[0].x,
+                y=frames[0].data[0].y,
+                z=frames[0].data[0].z,
+                colorscale='Viridis',
+                colorbar=dict(title='Implied Volatility'),
+                cmin=FIXED_Z_MIN,
+                cmax=FIXED_Z_MAX
+            )],
+            frames=frames
+        )
+
+        fig.update_layout(
+            title=f"{ticker} {option_type} Implied Volatility Surface Animation",
+            scene=dict(
+                xaxis=dict(range=[FIXED_MAT_MIN, FIXED_MAT_MAX],
+                           title='Days to Expiration'),
+                yaxis=dict(range=[FIXED_LOGM_MIN, FIXED_LOGM_MAX],
+                           title='Log-Moneyness ln(K/S)'),
+                zaxis=dict(range=[FIXED_Z_MIN, FIXED_Z_MAX],
+                           title='Implied Volatility'),
+                camera=dict(eye=dict(x=1.7, y=1.7, z=1.1))
+            ),
+            uirevision='keep_view',          # ← this is what lets you rotate and then play
+            updatemenus=[dict(
+                type="buttons",
+                showactive=False,
+                buttons=[
+                    dict(label="Play", method="animate",
+                         args=[None, {"frame": {"duration": 500, "redraw": True},
+                                      "fromcurrent": True,
+                                      "transition": {"duration": 200}}]),
+                    dict(label="Pause", method="animate",
+                         args=[[None], {"frame": {"duration": 0, "redraw": False},
+                                        "mode": "immediate",
+                                        "transition": {"duration": 0}}])
+                ]
+            )],
+            sliders=[dict(
+                steps=[dict(method='animate',
+                            args=[[frame.name], {"frame": {"duration": 300, "redraw": True},
+                                                 "mode": "immediate"}],
+                            label=frame.name) for frame in frames],
+                transition={"duration": 300},
+                x=0.1, xanchor="left", y=0.05, yanchor="bottom",
+                currentvalue={"prefix": "Date: ", "visible": True}
+            )]
+        )
+        return fig
+
 
     def iterate_tickers(self, tickers, start_date, end_date, conn_params):
         print("here")
@@ -1093,13 +1217,14 @@ def main():
     #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
-    today = dt.datetime.today()
+    
+    today = dt.datetime.today() - timedelta(days= 1)
     one_mo_ago = today - timedelta(days=30)
-    medium_date = one_mo_ago + timedelta(days= 20)
+    medium_date = one_mo_ago + timedelta(days= 15)
 
-    thetadata_test.build_options_animation('CVX', one_mo_ago, medium_date,0.2, 1.8,'linear',"PUT",conn_params,'Binomial Tree' )
+    thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
 
-    #thetadata_test.iterate_tickers(['PLTR','CVX'], one_mo_ago,today, conn_params)
+    #thetadata_test.iterate_tickers(['LMT','OXY','GOOG'], one_mo_ago,today, conn_params)
 
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\

@@ -14,5 +14,5 @@ if __name__ == "__main__":
         "port": "5432"
     }
     tickers = ['AAPL', 'PLTR', 'CVX']
-    theta_data_nightly_routine(tickers)
     nightly_routine(conn_params)
+    theta_data_nightly_routine(tickers)
