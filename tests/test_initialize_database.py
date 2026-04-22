@@ -7,6 +7,7 @@ import holidays
 import datetime as dt
 from datetime import date, timedelta
 import psycopg2
+import math
 
 
 
@@ -16,7 +17,7 @@ load_dotenv()
 class Testinitialize_database(unittest.TestCase):
     
     
-    def test_stock_close_data_accuracy(self):
+    def test_stock_data_accuracy(self):
         conn_params = {
             "host": "localhost",
             "database": os.getenv("DB_NAME"),
@@ -28,7 +29,6 @@ class Testinitialize_database(unittest.TestCase):
 
         ticker = 'AAPL'
         stock = yf.Ticker(ticker)
-        print(type(stock))
         history = stock.history(period = '5d')
 
         #getting previous day (because market needs to be closed)
@@ -42,7 +42,7 @@ class Testinitialize_database(unittest.TestCase):
         specific_day_row = history.loc[yesterday.strftime('%Y-%m-%d')]
         stock_close = specific_day_row['Close']        
 
-        SQL_query = '''SELECT close FROM stock_data where date = %s AND ticker = %s'''
+        close_query = '''SELECT close, div_yield_per FROM stock_data where date = %s AND ticker = %s'''
 
 
         args = [yesterday, ticker]
@@ -50,17 +50,28 @@ class Testinitialize_database(unittest.TestCase):
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
-                    cur.execute(SQL_query, args)
+                    cur.execute(close_query, args)
                     results = cur.fetchall()
+                    stock_close_datab = results[0][0]
+                    div_yield = results[0][1]
                     
         except Exception as e:
             print(e) 
 
-        database_value = results[0][0]
-
+        #div yield test is sub-optimal. div yield changes daily and compares previous day div yield @ close to current &
+        # div yield attribute not widely supported for most tickers on yfinance. But, don't know better easy source of div yield data currently
+        if yf.Ticker(ticker).info.get('dividendYield') != None:
+            yf_div_y = yf.Ticker(ticker).info.get('dividendYield')/100
+        else:
+            self.fail("No dividend yield")
         #Check stock values
-        
-        self.assertAlmostEqual(stock_close,database_value,delta=0.1)
+        with self.subTest(check = 'close_price'):
+            self.assertAlmostEqual(stock_close,stock_close_datab,delta=0.1)
+        with self.subTest(check = "dividend yield"):
+            self.assertTrue(math.isclose(yf_div_y,div_yield,rel_tol=0.3))
+
+
+
 
 
 
@@ -73,5 +84,7 @@ if __name__ == "__main__":
         "port": "5432"
         }
     
-    example = Testinitialize_database()
-    example.test_check_data_accuracy()
+    #example = Testinitialize_database()
+    #example.test_stock_data_accuracy()
+    
+    unittest.main()
