@@ -730,10 +730,6 @@ def nightly_routine(conn_params):
     iterate_through_S_and_P_store_dividend_yields(potential_day,potential_day,conn_params)
     return
 
-def implied_vol_surface_animation(conn_params):
-
-    return
-
 
 
 
