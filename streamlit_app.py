@@ -12,12 +12,12 @@ st.title("Implied Volatility Surface Animation")
 with st.sidebar:
     st.header("Controls")
     
-    tickers_input = st.text_input("Tickers (comma separated)", "XOM,AAPL")
+    tickers_input = st.text_input("Tickers ", "PLTR")
     ticker_list = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
     
     col1, col2 = st.columns(2)
-    start_date = col1.date_input("Start Date", dt.date(2025, 3, 1))
-    end_date = col2.date_input("End Date", dt.date(2025, 4, 10))
+    start_date = col1.date_input("Start Date", dt.date(2026, 1, 15))
+    end_date = col2.date_input("End Date", dt.date(2026, 4, 10))
     
     option_types = st.multiselect("Option Type(s)", ["CALL", "PUT"], default=["PUT"])
     calc_type = st.selectbox("Calculation Method", ["Binomial Tree", "Black Scholes"])

@@ -169,8 +169,8 @@ def initalize_options_table(conn_params):
                     ask DOUBLE PRECISION,
                     ask_condition BIGINT,
                     midpoint DOUBLE PRECISION,
-                    bs_implied_vol DOUBLE PRECISION,
-                    bin_imp_vol DOUBLE PRECISION,
+                    bs_implied_vol DOUBLE PRECISION DEFAULT 0,
+                    bin_imp_vol DOUBLE PRECISION DEFAULT 0,
 
 
                     PRIMARY KEY (ticker, expiration, price_date, strike, option_type)
@@ -194,7 +194,8 @@ def initialize_stock_data_table(conn_params):
     create_table = '''CREATE TABLE IF NOT EXISTS stock_data (
        ticker VARCHAR(10),
        date DATE,
-       dividend DOUBLE PRECISION,
+       dividend DOUBLE PRECISION DEFAULT 0,
+       div_yield_per DOUBLE PRECISION DEFAULT 0,
        close DOUBLE PRECISION,
        open DOUBLE PRECISION,
        high DOUBLE PRECISION,
@@ -221,6 +222,7 @@ def initialize_general_market_data_table(conn_params):
     create_table = '''CREATE TABLE IF NOT EXISTS market_data (
        date DATE,
        risk_free_rate DOUBLE PRECISION,
+       S_and_P_tickers TEXT[],
        
        PRIMARY KEY (date)
        )
@@ -298,7 +300,6 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
     dividends = dividends.copy()
     if dividends.index.tz is not None:
         dividends.index = dividends.index.tz_localize(None)
-
     try:
         start_date = pd.to_datetime(date_start)
         end_date = pd.to_datetime(date_end)
@@ -307,18 +308,24 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
             print("no dividends within specific date range")
             return 
         
-
+    
     except Exception as e:
         print(f"Date filtering error for {ticker} ({date_start} to {date_end}): {e}")
         return 
     
+    if isinstance(dividends,pd.DataFrame):
+        div_values = dividends['Dividends'].values
+    else:
+        div_values = dividends.values
+
     data = {
         'ticker': ticker,
         'date': dividends.index.date,
-        'dividend': dividends.values,
+        'dividend': div_values,
     }
 
     df = pd.DataFrame(data)
+    print("heree heree")
 
     insert_sql = """
         INSERT INTO stock_data (ticker, date, dividend)
@@ -329,6 +336,7 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
 
     rows_affected = 0
     pandas_generator = df.itertuples(index = False, name = None)
+    print(next(pandas_generator))
     try:
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
@@ -400,7 +408,7 @@ def store_stock_price_history_yfinance(ticker,start_date = None, end_date = None
 
 
     #Check if worked
-    """
+    
     query_first = "SELECT * FROM stock_data WHERE ticker = %s ORDER BY date ASC LIMIT 100;"
     query_last = "SELECT * FROM stock_data WHERE ticker = %s ORDER BY date DESC LIMIT 100;"
 
@@ -418,7 +426,7 @@ def store_stock_price_history_yfinance(ticker,start_date = None, end_date = None
                 print(df_last.sort_values('date'))
 
     except Exception as e:
-        print(e)"""
+        print(e)
     
 
 def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, conn_params):
@@ -537,7 +545,7 @@ def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_para
     return
 
 
-def iterate_through_S_and_P_store_stock_values(conn_params = None, start_date = None, end_date = None):
+def iterate_through_S_and_P_store_stock_values( start_date = None, end_date = None,conn_params = None):
 
     #load S&P tickers from database
     ticker_query = '''SELECT S_and_P_tickers FROM market_data WHERE S_and_P_tickers IS NOT NULL
@@ -553,7 +561,7 @@ def iterate_through_S_and_P_store_stock_values(conn_params = None, start_date = 
     tickers = df.iloc[-1].tolist()[0]
 
     for ticker in tickers:
-        store_stock_price_history_yfinance(ticker,start_date = None, end_date = None,conn_params=conn_params)
+        store_stock_price_history_yfinance(ticker,start_date = start_date, end_date = end_date,conn_params=conn_params)
         print(ticker)
         #trying not to get rate limited by API
         time.sleep(0.5)
@@ -574,10 +582,14 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
     except Exception as e:
         print(e)
     
+    print('1')
+    print(df.head())
+    print("2")
     tickers = df.iloc[-1].tolist()[0]
     print(tickers)
 
     for ticker in tickers:
+        print("3")
         store_stock_dividends_yfinance(ticker, start_date, end_date, conn_params=conn_params)
         print(ticker)
         #trying not to get rate limited by API
@@ -601,9 +613,11 @@ def S_and_P_tickers(conn_params):
     tickers = df.iloc[-1].tolist()[0]
     return tickers
 
-def nightly_store_stock_price_for_S_and_P(conn_params):
-    todays_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
-    iterate_through_S_and_P_store_stock_values(conn_params,todays_date,todays_date)
+def nightly_store_stock_price_for_S_and_P(conn_params, start_date = None, end_date = None):
+    if isinstance(start_date,None) and isinstance(end_date, None):
+        start_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
+        end_date = start_date
+    iterate_through_S_and_P_store_stock_values(conn_params,start_date,end_date)
 
     return
 
@@ -740,14 +754,31 @@ if __name__ == "__main__":
     #read_s_and_p_tickers_from_CSV(conn_params)
     #load_expiration_dates_all_tickers(conn_params)
     #store_nightly_interest_rate(conn_params)
-    '''
+    
     start_date = '2018-01-01'
+    soft_start_date = dt.datetime.strptime(start_date,"%Y-%m-%d") - timedelta(days = 700)
+    soft_start_date = dt.datetime.strftime(soft_start_date.date(), "%Y-%m-%d")
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
-    iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)'''
-    store_interest_rates_in_db(conn_params)
+    #iterate_through_S_and_P_store_stock_values(soft_start_date, end_date, conn_params)
+    iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
+    iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params)
+
+
+
+
+    #store_interest_rates_in_db(conn_params)
     #initalize_options_table(conn_params)
+    #start_date =  dt.datetime.today().date()-timedelta(days= 2)
+    #end_date = dt.datetime.today()
+    #end_date = dt.datetime.strftime(end_date, "%Y-%m-%d")
+    #start_date = dt.datetime.strftime(start_date, "%Y-%m-%d")
+    #load_expiration_dates_all_tickers(conn_params)
+    #store_interest_rates_in_db(conn_params)
+    #iterate_through_S_and_P_store_stock_values(conn_params, start_date, end_date)
+    #nightly_store_stock_price_for_S_and_P(conn_params,start_date,end_date)
     #iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
+    #iterate_through_S_and_P_store_dividend_yields(start_date,end_date, conn_params)
     #iterate_through_S_and_P_store_stock_values(conn_params)
     #store_stock_price_history_yfinance('NVDA', conn_params )
     #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)

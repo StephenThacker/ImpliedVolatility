@@ -13,7 +13,6 @@ import os
 import psycopg2
 import time
 from numba import njit, prange
-import requests
 import httpx
 import io
 from datetime import date, timedelta
@@ -785,6 +784,7 @@ class thetadata_options_scrape_EOD:
                         FROM options WHERE price_date = %s 
                         AND ticker = %s
                         AND option_type = %s'''
+            
         
         
         args = [target_date, ticker, option_type]
@@ -802,6 +802,8 @@ class thetadata_options_scrape_EOD:
                     stock_price = cur.fetchone()[0]
         except Exception as e:
             print(e)
+
+
 
             
 
@@ -826,11 +828,7 @@ class thetadata_options_scrape_EOD:
             
             df_mask = (~group_df['implied_volatility'].isna()) & \
                         (group_df['implied_volatility'] > 0) & \
-                        (group_df['implied_volatility'] <= 5.0) & \
-                        (group_df['strike'] >= lower_strike) & \
-                        (group_df['strike'] <= high_strike) & \
-                        (group_df['bid'] > 0) & (group_df['ask'] > 0) & \
-                        (group_df['volume'] > 0)
+                        (group_df['implied_volatility'] <= 5.0) 
             
             #df_mask = (~group_df['implied_volatility'].isna())
             
@@ -992,6 +990,7 @@ class thetadata_options_scrape_EOD:
 
     def build_options_animation(self, ticker, start_date, end_date, low_strike_coef, high_str_coef, interp_method,
                                 option_type, conn_params, calculation_type):
+
         
         nyse_holidays = holidays.financial_holidays('NYSE')
         date_list = []
@@ -1003,13 +1002,12 @@ class thetadata_options_scrape_EOD:
             date_list.append(current)
             current += timedelta(days=1)
 
-        # === COMPLETELY FIXED GRID FOR EVERY ANIMATION ===
-        FIXED_LOGM_MIN = -.2
-        FIXED_LOGM_MAX = 0.3
+        FIXED_LOGM_MIN = -0.5
+        FIXED_LOGM_MAX = 0.5
         FIXED_MAT_MIN  = 0
         FIXED_MAT_MAX  = 365
         FIXED_Z_MIN    = 0.0
-        FIXED_Z_MAX    = 1.5
+        FIXED_Z_MAX    = 1
 
         frames = []
         for date in date_list:
@@ -1081,7 +1079,7 @@ class thetadata_options_scrape_EOD:
                            title='Implied Volatility'),
                 camera=dict(eye=dict(x=1.7, y=1.7, z=1.1))
             ),
-            uirevision='keep_view',          # ← this is what lets you rotate and then play
+            uirevision='keep_view',       
             updatemenus=[dict(
                 type="buttons",
                 showactive=False,
@@ -1218,13 +1216,14 @@ def main():
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
     
-    today = dt.datetime.today() - timedelta(days= 1)
-    one_mo_ago = today - timedelta(days=30)
+    today = dt.datetime.today()
+    one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
 
-    thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
+    #thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
 
-    #thetadata_test.iterate_tickers(['LMT','OXY','GOOG'], one_mo_ago,today, conn_params)
+    ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
+    thetadata_test.iterate_tickers(['LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', 'NFLX'], one_mo_ago,today , conn_params)
 
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
