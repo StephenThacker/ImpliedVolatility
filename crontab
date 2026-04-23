@@ -1,0 +1,5 @@
+# Run every minute
+*/1 * * * * echo "Hello from Supercronic! The time is $(date)"
+
+# Run every 5 seconds (Supercronic specific extension)
+*/5 * * * * * * echo "Running a quick task..."

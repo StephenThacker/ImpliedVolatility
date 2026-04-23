@@ -1223,7 +1223,7 @@ def main():
     #thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
 
     ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
-    thetadata_test.iterate_tickers(['LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', 'NFLX'], one_mo_ago,today , conn_params)
+    thetadata_test.iterate_tickers(['PLTR'], one_mo_ago,today , conn_params)
 
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\

@@ -1,1 +1,0 @@
-0 20 * * * root python /app/nightly_update.py >> /var/log/cron.log 2>&1
