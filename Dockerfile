@@ -11,6 +11,14 @@ RUN pip install --no-cache-dir \
     requests \
     psycopg2-binary \
     python-dotenv \
+    openpyxl\
+    yfinance\
+    datetime\
+    plotly\
+    holidays\
+    matplotlib\
+    httpx\
+    numba\
     numpy \
     pandas \
     scipy

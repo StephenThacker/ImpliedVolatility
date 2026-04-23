@@ -614,7 +614,7 @@ def S_and_P_tickers(conn_params):
     return tickers
 
 def nightly_store_stock_price_for_S_and_P(conn_params, start_date = None, end_date = None):
-    if isinstance(start_date,None) and isinstance(end_date, None):
+    if start_date is None and end_date is None:
         start_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
         end_date = start_date
     iterate_through_S_and_P_store_stock_values(conn_params,start_date,end_date)
@@ -668,7 +668,7 @@ def store_nightly_interest_rate(conn_params):
 def get_expiration_list_options_ticker(ticker, conn_params, base_url = "http://127.0.0.1:25503/v3" ):
     BASE_URL = base_url
     params = {'symbol': ticker}
-
+    print("3")
     url = BASE_URL + '/option/list/expirations'
 
     data_to_store = []
@@ -711,8 +711,10 @@ def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:
     return
 
 def nightly_routine(conn_params):
-    potential_day = dt.datetime.today().date()
-
+    #adding logic for testing
+    potential_day = dt.datetime.today() - timedelta(days=1)
+    potential_day = potential_day.date()
+    print("1")
     if potential_day.weekday() >= 5:
         print("not a market day")
         return 
