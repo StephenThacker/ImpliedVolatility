@@ -712,9 +712,8 @@ def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:
 
 def nightly_routine(conn_params):
     #adding logic for testing
-    potential_day = dt.datetime.today() - timedelta(days=1)
+    potential_day = dt.datetime.today()
     potential_day = potential_day.date()
-    print("1")
     if potential_day.weekday() >= 5:
         print("not a market day")
         return 

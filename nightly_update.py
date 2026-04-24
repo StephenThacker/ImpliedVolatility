@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 import os
 from initialize_database import nightly_routine
 from implied_vol import theta_data_nightly_routine
+import datetime as dt
+from datetime import timedelta
 
 load_dotenv()
 

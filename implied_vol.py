@@ -377,11 +377,9 @@ class y_finance_options_chain:
 
         fig.show()
 
-
 #target date is assummed to be a datetime object
 class thetadata_options_scrape_EOD:
     def __init__(self):
-        self.PARAMS = {}
         #might want to refactor calculate dates to be an instance passed to the class, to avoid redundant memory drag
         #If I'm going to pull data for like 500 tickers
         self.date_calculator = calculate_dates()
@@ -665,10 +663,9 @@ class thetadata_options_scrape_EOD:
         return dates_tuple
     
 
-    #scrapes data from API for a list of expirations, ignores invalid expiration dates and stores data in database
-    def scrape_data_interest_rate_data(self):
-        return
-    
+    def options_api_pull_refactored(self,ticker, target_date, expiration_date, conn_params, base_url = "http://127.0.0.1:25503/v3"):
+
+        return    
     
     #Given a target date, pulls expiration data through the available options chain expirations
     #pulling data from API and storing in the database
@@ -755,14 +752,6 @@ class thetadata_options_scrape_EOD:
 
         return
     
-    #Pulls options expiration list from database
-    #iterates through all expiration dates
-    #Either pulls from the API or reads from the database, if the data is already there
-    #Takes this data, formats it into the correct format
-    #feeds it to the different volatility surface models
-    def recreate_options_surface_from_database(self):
-
-        return
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,
                                                 option_type, conn_params, calculation_type, animate=False,
@@ -891,102 +880,6 @@ class thetadata_options_scrape_EOD:
 
         return [M_grid, LM_grid, IV_grid]
 
-    '''
-    def build_options_animation(self,ticker, start_date, end_date,low_strike_coef, high_str_coef, interp_method,\
-                                            option_type, conn_params, calculation_type):
-        nyse_holidays = holidays.financial_holidays('NYSE')
-        date_list = [] 
-        date_indx = start_date
-        while date_indx <= end_date:
-            if date_indx.weekday() >= 5:
-                date_indx = date_indx + timedelta(days = 1)
-                continue
-        
-
-
-            if date_indx in nyse_holidays:
-                date_indx = date_indx + timedelta(days = 1)
-                continue
-            date_list.append(date_indx)
-            date_indx = date_indx + timedelta(days = 1)
-
-        IV_surfaces =[]
-        frames = []
-        for date in date_list:
-            try:
-                M_grid, LM_grid, IV_grid = self.plot_options_surface_from_database(ticker,date, low_strike_coef, high_str_coef,interp_method,option_type,\
-                                                        conn_params, calculation_type, animate = True)
-            except Exception as e:
-                print("date missing for imp vol surface", e)
-                continue
-
-            IV_surfaces.append(IV_grid)
-            frame = go.Frame(
-                data=[go.Surface(
-                    x=M_grid,
-                    y=LM_grid,
-                    z=IV_grid,
-                    colorscale='Viridis',
-                    colorbar=dict(title='Implied Volatility')   # ← fixed typo
-                )],
-                name=date.strftime('%Y-%m-%d'),
-                layout=dict(
-                    title=f"{ticker} {option_type} {date.strftime('%Y-%m-%d')}"
-                )
-            )
-            frames.append(frame)
-        
-        fig = go.Figure(
-            data=[go.Surface(x=M_grid, y=LM_grid, z=IV_surfaces[0])],  
-            frames=frames                                             
-            )
-        
-
-        fig.update_layout(
-                    title=f"{ticker} {option_type} Implied Volatility Surface Animation",
-                    scene=dict(
-                        xaxis_title='Days to Expiration',
-                        yaxis_title='Log-Moneyness ln(K/S)',
-                        zaxis_title='Implied Volatility',
-                    ),
-                    updatemenus=[dict(
-                        type="buttons",
-                        showactive=False,
-                        buttons=[dict(
-                            label="Play",
-                            method="animate",
-                            args=[None, {
-                                "frame": {"duration": 600, "redraw": True},
-                                "fromcurrent": True,
-                                "transition": {"duration": 200}
-                            }]
-                        ),
-                        dict(
-                            label="Pause",
-                            method="animate",
-                            args=[[None], {
-                                "frame": {"duration": 0, "redraw": False},
-                                "mode": "immediate",
-                                "transition": {"duration": 0}
-                            }]
-                        )]
-                    )],
-                    sliders=[dict(
-                        steps=[dict(method='animate',
-                                    args=[[frame.name],
-                                        {"frame": {"duration": 300, "redraw": True},
-                                        "mode": "immediate"}],
-                                    label=frame.name) for frame in frames],
-                        transition={"duration": 300},
-                        x=0.1,         
-                        xanchor="left",
-                        y=0.05,      
-                        yanchor="bottom",
-                        currentvalue={"prefix": "Date: ", "visible": True}
-                    )]
-                )
-        
-        return fig'''
 
     def build_options_animation(self, ticker, start_date, end_date, low_strike_coef, high_str_coef, interp_method,
                                 option_type, conn_params, calculation_type):
@@ -1108,7 +1001,6 @@ class thetadata_options_scrape_EOD:
 
 
     def iterate_tickers(self, tickers, start_date, end_date, conn_params):
-        print("here")
         date_indx = start_date
         dates_list = [] 
         while date_indx <= end_date:

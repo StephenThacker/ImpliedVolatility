@@ -1,1 +1,1 @@
-51 * * * * python3 /app/nightly_update.py
+0 18 * * 1-5 python3 /app/nightly_update.py
