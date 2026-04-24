@@ -19,6 +19,7 @@ from datetime import date, timedelta
 import csv
 import holidays
 from utils import S_and_P_tickers
+import asyncio
 import plotly
 
 load_dotenv()
@@ -402,8 +403,6 @@ class thetadata_options_scrape_EOD:
 
         url = BASE_URL + '/option/history/eod'
 
-        print("params")
-        print(PARAMS)
 
         with httpx.stream("GET", url, params = PARAMS, timeout=60) as response:
             response.raise_for_status()
@@ -662,10 +661,42 @@ class thetadata_options_scrape_EOD:
 
         return dates_tuple
     
+    def options_pull_api_data_from_range_refactored(self, ticker, start_date, end_date, conn_params):
+        expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
+        
+        
+        return
+    
 
-    def options_api_pull_refactored(self,ticker, target_date, expiration_date, conn_params, base_url = "http://127.0.0.1:25503/v3"):
+    #pull options data for a ticker between two dates
+    def options_api_pull_refactored(self,ticker = None, start_date:dt.datetime = None, end_date: dt.datetime = None,\
+                                    base_url = "http://127.0.0.1:25503/v3"):
+        
+        start_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
+        end_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
 
-        return    
+        
+        start_date = '20241104'
+        end_date = '20241204'
+        ticker = 'AAPL'
+
+        BASE_URL = base_url
+
+        PARAMS = {'start_date': start_date, 'end_date':end_date, 'symbol':ticker, "expiration":"*"}
+
+        url = BASE_URL + '/option/history/eod'
+
+        with httpx.stream("GET",url, params = PARAMS, timeout=60) as response:
+            response.raise_for_status()
+            lines = response.iter_lines()
+            reader = csv.DictReader(lines)
+
+            yield from reader
+
+    def stream_options_into_db(self):
+        return
+
+    
     
     #Given a target date, pulls expiration data through the available options chain expirations
     #pulling data from API and storing in the database
@@ -1115,8 +1146,9 @@ def main():
     #thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
 
     ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
-    thetadata_test.iterate_tickers(['AAPL'], today,today , conn_params)
-
+    #thetadata_test.iterate_tickers(['AAPL'], today,today , conn_params)
+    
+    thetadata_test.options_api_pull_refactored()
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''

@@ -21,7 +21,8 @@ htmlcov/
 .dmypy.json
 dmypy.json
 tests/pytest_results.txt
-./todolist.txt
+todolist.txt
+tests/AAPLtestfile.txt
 
 # Virtual environments
 venv/
