@@ -617,7 +617,7 @@ def nightly_store_stock_price_for_S_and_P(conn_params, start_date = None, end_da
     if start_date is None and end_date is None:
         start_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
         end_date = start_date
-    iterate_through_S_and_P_store_stock_values(conn_params,start_date,end_date)
+    iterate_through_S_and_P_store_stock_values(start_date,end_date, conn_params)
 
     return
 

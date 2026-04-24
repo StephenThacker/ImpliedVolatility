@@ -1216,14 +1216,14 @@ def main():
     stock_range_start_date = target_date
     stock_range_end_date = target_date + timedelta(days = 10)
     
-    today = dt.datetime.today()
+    today = dt.datetime.today() - timedelta(days=1)
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
 
     #thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
 
     ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
-    thetadata_test.iterate_tickers(['PLTR'], one_mo_ago,today , conn_params)
+    thetadata_test.iterate_tickers(['AAPL'], today,today , conn_params)
 
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
