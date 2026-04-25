@@ -9,6 +9,7 @@ import datetime as dt
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
+from psycopg2.extras import execute_values
 import os
 import psycopg2
 import time
@@ -20,6 +21,7 @@ import csv
 import holidays
 from utils import S_and_P_tickers
 import asyncio
+from collections.abc import Iterator
 import plotly
 
 load_dotenv()
@@ -661,24 +663,16 @@ class thetadata_options_scrape_EOD:
 
         return dates_tuple
     
-    def options_pull_api_data_from_range_refactored(self, ticker, start_date, end_date, conn_params):
-        expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
-        
-        
-        return
     
 
     #pull options data for a ticker between two dates
     def options_api_pull_refactored(self,ticker = None, start_date:dt.datetime = None, end_date: dt.datetime = None,\
-                                    base_url = "http://127.0.0.1:25503/v3"):
+                                    base_url = "http://127.0.0.1:25503/v3") -> Iterator[dict[str, str]]:
+        
         
         start_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
-        end_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
-
-        
-        start_date = '20241104'
-        end_date = '20241204'
-        ticker = 'AAPL'
+        end_date = dt.datetime.strftime(end_date.date(),"%Y%m%d")
+        ticker = ticker
 
         BASE_URL = base_url
 
@@ -693,8 +687,55 @@ class thetadata_options_scrape_EOD:
 
             yield from reader
 
-    def stream_options_into_db(self):
-        return
+    def stream_options_into_db(self, start_date: dt.datetime = dt.datetime.today(), end_date:dt.datetime = dt.datetime.today(), conn_params = None):
+        
+        insert_sql = '''INSERT INTO options (
+        ticker, expiration, strike, option_type, price_date,\
+                open, high, low, close, volume, count, bid_size,bid,\
+                    ask_size, ask, midpoint )
+                    VALUES %s
+                    ON CONFLICT (ticker, expiration, strike, price_date, option_type) DO NOTHING;
+      
+        '''
+        batch_size = 500
+        batch_list = []
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    for row in self.options_api_pull_refactored('AAPL',start_date, end_date):
+                        values = (row['symbol'],row['expiration'],row['strike'],row['right'],row['created'],\
+                                   row['open'], row['high'], row['low'], row['close'], row['volume'], row['count'],\
+                                     row['bid_size'], row['bid'],row['ask_size'], row['ask'], ((float(row['ask'])+float(row['bid']))/2) )
+                        batch_list.append(values)
+                        
+                        if len(batch_list) >= batch_size:
+                            execute_values(cur, insert_sql, batch_list)
+                            batch_list = []
+                    
+                    if batch_list:
+                        execute_values(cur,insert_sql,batch_list)
+
+        except Exception as e:
+            print(e)
+
+
+        #SELECT_SQL = '''SELECT * FROM options WHERE ticker = %s AND price_date >= %s AND price_date <= %s'''
+
+
+        '''
+        results = []
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(SELECT_SQL, ('AAPL', start_date, end_date))
+                    results = cur.fetchall()
+        except Exception as e:
+            print(e)
+
+        for row in results:
+            print(row)
+
+        return'''
 
     
     
@@ -1148,7 +1189,13 @@ def main():
     ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
     #thetadata_test.iterate_tickers(['AAPL'], today,today , conn_params)
     
-    thetadata_test.options_api_pull_refactored()
+    start_date = dt.datetime.today() - timedelta(days=180)
+    end_date = dt.datetime.today() - timedelta(days = 0)
+    start_time = time.perf_counter()
+    thetadata_test.stream_options_into_db(start_date, end_date, conn_params=conn_params)
+    end_time = time.perf_counter()
+    print(end_time - start_time)
+
 
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''
