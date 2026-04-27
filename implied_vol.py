@@ -1,4 +1,3 @@
-import yfinance as yf
 from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
@@ -205,180 +204,6 @@ class black_scholes_implied_volatility:
             count += 1
         return sigma
 
-
-
-
-class y_finance_options_chain:
-    
-    def __init__(self, ticker, method,number_of_layers, steps, call_or_put):
-        self.ticker = ticker
-        self.options_chains_dict = {}
-        self.method = method
-        self.number_of_layers = number_of_layers
-        self.call_or_put = call_or_put
-        self.calculate_date_object = calculate_dates()
-        self.black_scholes = black_scholes_implied_volatility()
-        self.fetch_options_data(self.ticker)
-
-    
-    def calc_implied_volatility(self):
-        if self.method == 'Black Scholes':
-            if self.call_or_put == "call":
-                bs_price_func = self.black_scholes.black_scholes_call_option
-            if self.call_or_put == "put":
-                bs_price_func = self.black_scholes.black_scholes_put_option
-            for key in self.options_chains_dict.keys():
-                today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
-                date_fraction = self.calculate_date_object.dates_to_expiration_fraction(key, today)
-                self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)(1e-5, self.last_stock_price,\
-                                                                                                                         self.options_chains_dict[key]['midpoint'],\
-                                                                                                                            self.risk_free,\
-                                                                                                                                self.dividend_yield,\
-                                                                                                                                    date_fraction,\
-                                                                                                                                        self.options_chains_dict[key]['strike'],\
-                                                                                                                                            bs_price_func)
-                
-                self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key, today)
-        #key is the contract expiration date
-        #dates to expiration, is the dates the contract has to expire
-        start_time = time.perf_counter()
-        if self.method == "BinTree Continuous Deriv":
-                for key in self.options_chains_dict.keys():
-                    today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
-                    dates_to_expiration = self.calculate_date_object.dates_to_expiration_days(key, today)
-                    self.options_chains_dict[key]['daystoExpir'] = np.vectorize(self.calculate_date_object.num_dates_to_expir)(key, today)
-                    self.tree = binomial_tree_vectorized(self.number_of_layers,self.last_stock_price,\
-                                                self.risk_free, dates_to_expiration,\
-                                                    self.dividend_yield,\
-                                                        self.call_or_put)
-                                                        
-                    vec_func = np.vectorize(self.tree.vectorized_brentq_wrapper, otypes=[float])
-                    self.options_chains_dict[key]['calcImpliedVol'] = vec_func(
-                        0.01,
-                        5,
-                        self.options_chains_dict[key]['strike'].values,
-                        self.options_chains_dict[key]['midpoint'].values
-                    )
-                    #self.options_chains_dict[key]['calcImpliedVol'] = np.vectorize(self.vectorized_brentq_wrapper)(0.01,2, self.options_chains_dict[key]['strike'],\
-                                                                                                                  #self.options_chains_dict[key]['midpoint'])
-  
-        return
-    
-   
-   
-    def fetch_options_data(self, ticker):
-        self.ticker = yf.Ticker(ticker)
-        expiration_dates = self.ticker.options
-        self.info = self.ticker.info
-        if self.call_or_put == "call":
-            self.options_chains_dict = {exp : self.ticker.option_chain(exp).calls for exp in expiration_dates}
-        if self.call_or_put =="put":
-            self.options_chains_dict = {exp : self.ticker.option_chain(exp).puts for exp in expiration_dates}
-
-        for exp, df in self.options_chains_dict.items():
-            #print("df columns test")
-            #print(df.columns)
-            print(df.columns)
-            if 'bid' in df.columns and 'ask' in df.columns:
-                df['midpoint'] = (df['bid'] + df['ask']) / 2
-            print(df.head())
-        self.last_stock_price = self.ticker.history(period="1d")['Close'].iloc[-1]
-        data = yf.Ticker("^IRX").history(period="5d")
-        if not data.empty:
-            self.risk_free = data['Close'].iloc[-1] / 100
-        else:
-            self.risk_free = 0.04
-
-
-        if yf.Ticker(ticker).info.get('dividendYield') != None:
-            self.dividend_yield = yf.Ticker(ticker).info.get('dividendYield')/100
-        else:
-            self.dividend_yield = 0
-
-        self.calc_implied_volatility()
-
-
-
-    def plot_imp_vol_surface(self):
-        last_price = self.last_stock_price
-
-        lower_strike = last_price * 0.7
-        upper_strike = last_price * 1.5
-
-        max_days_to_exp = 150
-
-        log_moneyness_all = []
-        maturities_all = []
-        implied_vols_all = []
-        today = dt.datetime.strftime(dt.datetime.today(), "%Y-%m-%d")
-
-        for exp_date, df in self.options_chains_dict.items():
-            days_to_exp = self.calculate_date_object.num_dates_to_expir(exp_date, today)
-            if days_to_exp > max_days_to_exp or days_to_exp < 0:
-                continue
-
-            valid_mask = (~df['calcImpliedVol'].isna()) & \
-                        (df['calcImpliedVol'] > 0) & \
-                        (df['calcImpliedVol'] <= 2.0) & \
-                        (df['strike'] >= lower_strike) & \
-                        (df['strike'] <= upper_strike) & \
-                        (df['bid'] > 0) & (df['ask'] > 0) & \
-                        (df['volume'] > 0)
-
-            strikes = df.loc[valid_mask, 'strike'].values
-            maturity = days_to_exp
-            implied_vols = df.loc[valid_mask, 'calcImpliedVol'].values
-
-            if len(strikes) == 0:
-                continue
-
-            log_moneyness = np.log(strikes / last_price)
-
-            log_moneyness_all.extend(log_moneyness)
-            maturities_all.extend([maturity] * len(strikes))
-            implied_vols_all.extend(implied_vols)
-
-        log_moneyness_all = np.array(log_moneyness_all)
-        maturities_all = np.array(maturities_all)
-        implied_vols_all = np.array(implied_vols_all)
-
-        if len(log_moneyness_all) == 0:
-            print("No data points available for plotting after filtering.")
-            return
-
-        logm_grid = np.linspace(log_moneyness_all.min(), log_moneyness_all.max(), 50)
-        maturity_grid = np.linspace(maturities_all.min(), maturities_all.max(), 50)
-
-        M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
-
-        IV_grid = griddata(
-            points=(maturities_all, log_moneyness_all),
-            values=implied_vols_all,
-            xi=(M_grid, LM_grid),
-            method='linear'
-        )
-
-        fig = go.Figure(data=[go.Surface(
-            x=M_grid,
-            y=LM_grid,
-            z=IV_grid,
-            colorscale='Viridis',
-            colorbar=dict(title='Implied Volatility')
-        )])
-
-        fig.update_layout(
-            title=f"Implied Vol Surface (Log-Moneyness) for {self.ticker.ticker}",
-            scene=dict(
-                xaxis_title='Days to Expiration',
-                yaxis_title='Log-Moneyness ln(K/S)',
-                zaxis_title='Implied Volatility',
-            ),
-            autosize=True,
-            width=800,
-            height=700
-        )
-
-        fig.show()
 
 #target date is assummed to be a datetime object
 class thetadata_options_scrape_EOD:
@@ -697,7 +522,7 @@ class thetadata_options_scrape_EOD:
                     ON CONFLICT (ticker, expiration, strike, price_date, option_type) DO NOTHING;
       
         '''
-        batch_size = 500
+        batch_size = 1000
         batch_list = []
         try:
             with psycopg2.connect(**conn_params) as conn:
@@ -1210,18 +1035,6 @@ def main():
     thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
     thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")'''
 
-
-    '''
-    call_bin_options = y_finance_options_chain("BBWI", "BinTree Continuous Deriv", 100,30, "call")
-    call_put_options = y_finance_options_chain("BBWI","BinTree Continuous Deriv", 100,30, "put" )
-    call_options_scholes = y_finance_options_chain("BBWI", "Black Scholes",None,None,"call")
-    put_options_scholes = y_finance_options_chain("BBWI", "Black Scholes", None, None, "put")
-
-    call_bin_options.plot_imp_vol_surface()
-    call_put_options.plot_imp_vol_surface()
-    call_options_scholes.plot_imp_vol_surface()
-    put_options_scholes.plot_imp_vol_surface()
-    '''
 
 if __name__ == "__main__":
     main()
