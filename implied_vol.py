@@ -213,63 +213,7 @@ class thetadata_options_scrape_EOD:
         self.date_calculator = calculate_dates()
         self.black_scholes = black_scholes_implied_volatility()
 
-
-    #for single ticker/expiration date, pulls all options data for a specific date and stores into database
-    def options_api_pull_per_exp_date(self,ticker, target_date, expiration_date, conn_params, base_url = "http://127.0.0.1:25503/v3"):        
-        #since expiration dates includes all expiration dates that have ever existed for options,
-        # we need to filter dates that are not relevant on the target date.
-        BASE_URL = base_url
-        expiration = dt.datetime.strftime(expiration_date, "%Y-%m-%d")
-        PARAMS = {'start_date': target_date,'end_date': target_date,'symbol': ticker,'expiration':expiration }
-
-        start_date = dt.datetime.strftime(target_date,"%Y%m%d") 
-        end_date = dt.datetime.strftime(target_date,"%Y%m%d") 
-
-        PARAMS['start_date'] = start_date
-        PARAMS['end_date'] = end_date
-
-        url = BASE_URL + '/option/history/eod'
-
-
-        with httpx.stream("GET", url, params = PARAMS, timeout=60) as response:
-            response.raise_for_status()
-            content = response.read()
-            df = pd.read_csv(io.BytesIO(content), header = 0)
-
-        df = df.rename(columns = {'right': 'option_type'})
-        df['ticker'] = ticker
-        df['price_date'] = target_date
-
-        df['expiration'] = pd.to_datetime(df['expiration']).dt.date
-        df['price_date'] = pd.to_datetime(df['price_date']).dt.date
-        df['midpoint'] = (df['ask'] + df['bid'])/2
-        cols = df.columns
-
-        #purging any NaN values
-        df = df[cols].where(df[cols].notnull(),None)
-
-        cols = [ 'ticker', 'symbol', 'expiration','strike','option_type','created','price_date','last_trade',\
-                'open', 'high','low', 'close', 'volume', 'count', 'bid_size','bid_exchange','bid','bid_condition',\
-                    'ask_size','ask_exchange','ask','ask_condition', 'midpoint']
-        
-        insert_sql = '''INSERT INTO options (
-        ticker, symbol, expiration, strike,option_type,created,price_date,last_trade,\
-                open, high,low, close, volume, count, bid_size,bid_exchange,bid,bid_condition,\
-                    ask_size,ask_exchange,ask,ask_condition, midpoint )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING;
-      
-        '''
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    pandas_generator = df[cols].itertuples(index = False,name = None )
-                    cur.executemany(insert_sql,pandas_generator)
-        except Exception as e:
-            print(e)
-        return
-    
+   
     #selects expirations that currently exist in the database, for a specific target
     def select_available_expiration_dates_for_ticker(self, conn_params, ticker : str, target_date : dt.datetime.date)\
           -> list[dt.datetime.date]:
@@ -453,107 +397,9 @@ class thetadata_options_scrape_EOD:
             print(e)
 
 
-        '''
-        #check to see if inserted properly
-        sql_query = 'SELECT bs_implied_vol FROM options'
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(sql_query)
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-
-        print("testing database rows")
-        for row in results:
-            print(row)
-        
-        return'''
         del options_dataframe
         return
 
-
-
-
-
-
-    def pull_options_data_from_database_per_expiration(self, ticker, target_date, expiration_date, conn_params):
-        #extract options data from database
-
-        if isinstance(target_date,dt.datetime):
-            target_date = target_date.date()
-        sql_query = '''SELECT ticker, strike, midpoint, expiration, price_date, option_type
-                       FROM options WHERE ticker = %s AND expiration = %s AND price_date = %s
-                       ORDER BY strike ASC'''
-        
-        args = [ticker, expiration_date, target_date]
-        
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    df = pd.read_sql(sql_query, conn, params = args)
-        except Exception as e:
-            print(e)
-
-        #pulling risk free rate from database and broadcasting to pandas dataframe
-        sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
-        args = [target_date]
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(sql_query,args)
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-        
-        print(results)
-        df["risk_free"] = results[0][0]
-        df['risk_free'] = df['risk_free']/100
-
-        sql_query = '''SELECT div_yield_per FROM stock_data WHERE ticker = %s AND date = %s'''
-        args = [ticker, target_date]
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(sql_query,args)
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-        
-        df['dividend_yield'] = results[0][0]/100
-          
-
-
-
-        #pulling EOD stock data and broadcasting to pandas dataframe
-        sql_query = '''SELECT close FROM stock_data WHERE date = %s AND ticker = %s'''
-        args = [target_date, ticker]
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(sql_query,args)
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-
-        if df.empty:
-            print("dataframe is empty")
-            return
-
-        df["stock_price"] = results[0][0]
-
-        #converting expiration date to date fraction and broadcasting to pandas dataframe
-        target_date_str = dt.datetime.strftime(target_date, "%Y-%m-%d")
-        date_fraction = self.date_calculator.dates_to_expiration_fraction(expiration_date, target_date_str)
-        df["date_fraction"] = date_fraction
-        days_to_expiration = self.date_calculator.dates_to_expiration_days(expiration_date, target_date_str)
-        df['days_to_expir'] = days_to_expiration
-
-
-        return df
     
     def pull_data_and_calc_iv(self, ticker, target_date, expiration_date, conn_params, calculation_type ):
         options_data = self.pull_options_data_from_database_per_expiration( ticker, target_date, expiration_date, conn_params)
@@ -561,138 +407,7 @@ class thetadata_options_scrape_EOD:
         self.iv_calculation(options_data, conn_params, calculation_type)
 
         return
-    
-
-    #calculates and stores implied vol
-    def iv_calculation(self, options_dataframe, conn_params, calculation_type = "Black Scholes", number_of_layers = 100):
-        def call_or_put(arg_string):
-            return self.black_scholes.call_or_put_method[arg_string]
-        
-
-
-        options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
-        if calculation_type == "Black Scholes":
-            options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
-                                            (1e-5, options_dataframe['stock_price'],\
-                                            options_dataframe['midpoint'],\
-                                            options_dataframe['risk_free'],\
-                                            options_dataframe['dividend_yield'],\
-                                            options_dataframe['date_fraction'],\
-                                            options_dataframe['strike'],\
-                                            options_dataframe['call_or_put_func'])
-        
-
-        if calculation_type == "Binomial Tree":
-            print(options_dataframe['stock_price'])
-            stock_price = options_dataframe['stock_price'].iloc[-1]
-            interest_rate = options_dataframe['risk_free'].iloc[-1]
-            stock_dividend_yield = options_dataframe['dividend_yield'].iloc[-1]
-            days_to_expiration = options_dataframe['days_to_expir'].iloc[-1]
-            call_tree = binomial_tree_vectorized(number_of_layers, stock_price, interest_rate, days_to_expiration, stock_dividend_yield,"CALL")
-            put_tree = binomial_tree_vectorized(number_of_layers, stock_price, interest_rate, days_to_expiration, stock_dividend_yield,"PUT")
-
-            #creating pandas masks
-            is_call = options_dataframe['option_type'] == 'CALL'
-            is_put = options_dataframe['option_type'] == 'PUT'
-            
-            
-            cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-            options_dataframe.loc[is_call, 'implied_vol'] = cal_vec_func(0.01, 5, options_dataframe.loc[is_call, 'strike'].values, options_dataframe.loc[is_call, 'midpoint'].values)     
-            put_vec_func = np.vectorize(put_tree.vectorized_brentq_wrapper, otypes=[float])
-            options_dataframe.loc[is_put, 'implied_vol'] = put_vec_func(0.01, 5, options_dataframe.loc[is_put, 'strike'].values, options_dataframe.loc[is_put, 'midpoint'].values)
-            del call_tree
-            del put_tree
-
-
-        #Check values to see if it looks good. 
-        '''
-        call_df = options_dataframe[options_dataframe['option_type'] == "CALL"]
-        put_df = options_dataframe[options_dataframe['option_type'] == 'PUT']
-
-        print("printing df call rows")
-        for row in call_df[['strike','implied_vol']].itertuples():
-            print(row)
-
-        print("printing df put rows")
-        for row in put_df[['strike','implied_vol']].itertuples():
-            print(row)'''
-        
-        
-        #clean IV values to remove non-convergent numbers and replace with 0.
-        options_dataframe['implied_vol'] = options_dataframe['implied_vol'].mask((options_dataframe['implied_vol']<0) | \
-                                                                  (options_dataframe['implied_vol']>10), 0)
-        
-        
-        #Store in database
-        if calculation_type == "Black Scholes":
-            sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bs_implied_vol) 
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (ticker, expiration, price_date, strike, option_type)
-                        DO UPDATE SET
-                        bs_implied_vol = EXCLUDED.bs_implied_vol'''
-        
-        if calculation_type == "Binomial Tree":
-            sql_query = '''INSERT INTO options (ticker, expiration, price_date, strike, option_type, bin_imp_vol) 
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (ticker, expiration, price_date, strike, option_type)
-                        DO UPDATE SET
-                        bin_imp_vol = EXCLUDED.bin_imp_vol'''
-
-            
-        columns = ['ticker', 'expiration', 'price_date', 'strike', 'option_type', 'implied_vol']
-
-        pd_generator = options_dataframe[columns].itertuples(index = False, name = None)
-
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.executemany(sql_query, pd_generator)
-        except Exception as e:
-            print(e)
-
-
-        '''
-        #check to see if inserted properly
-        sql_query = 'SELECT bs_implied_vol FROM options'
-
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(sql_query)
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-
-        print("testing database rows")
-        for row in results:
-            print(row)
-        
-        return'''
-        del options_dataframe
-        return
-
-
-
-    
-
-    def pull_expiration_list_from_database(self,ticker,conn_params):
-
-
-        retrieve_dates = '''SELECT dates from expiration_series WHERE ticker = %s; '''
-
-        #pull date list from postgres database
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(retrieve_dates, [ticker])
-                    dates_tuple = cur.fetchall()[0]
-                    return dates_tuple
-        except Exception as e:
-            print(e)
-
-        return dates_tuple
-    
+       
     
 
     #pull options data for a ticker between two dates
@@ -749,110 +464,7 @@ class thetadata_options_scrape_EOD:
             print(e)
 
 
-        #SELECT_SQL = '''SELECT * FROM options WHERE ticker = %s AND price_date >= %s AND price_date <= %s'''
-
-
-        '''
-        results = []
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(SELECT_SQL, ('AAPL', start_date, end_date))
-                    results = cur.fetchall()
-        except Exception as e:
-            print(e)
-
-        for row in results:
-            print(row)
-
-        return'''
-
     
-    
-    #Given a target date, pulls expiration data through the available options chain expirations
-    #pulling data from API and storing in the database
-
-    def iterate_through_expirations_load_data(self, ticker, target_date, conn_params, calculation_type,base_url = "http://127.0.0.1:25503/v3"):
-        #pull the list of expiration dates from the database
-
-        expiration_list = self.pull_expiration_list_from_database(ticker,conn_params)[0]
-        # filter dates beyond target date
-        # dates are filtered with all dates > cutoff included. Since this is EOD data, I am not including
-        # the target day. We only want options contracts expiring afterwards.
-
-        expiration_list = [date for date in expiration_list if date > target_date.date()]
-
-        #for date in expiration_list, check if it's in the database
-        #if it's not in the database, query the API
-        #if it's not in the API, continue to the next date
-
-        active_expirations = []
-        previous_expirations = []
-
-        for date in expiration_list:
-            if calculation_type == "Black Scholes":
-                exists_query = '''SELECT (EXISTS ( SELECT 1 
-                                FROM options
-                                WHERE expiration = %s
-                                AND ticker = %s
-                                AND price_date = %s
-                                AND bs_implied_vol IS NOT NULL
-                                ))::int;'''
-            if calculation_type == "Binomial Tree":
-                exists_query = '''SELECT (EXISTS ( SELECT 1 
-                                FROM options
-                                WHERE expiration = %s
-                                AND ticker = %s
-                                AND price_date = %s
-                                AND bin_imp_vol IS NOT NULL
-                                ))::int;'''
-
-            args = [date, ticker, target_date]
-            try:
-                with psycopg2.connect(**conn_params) as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(exists_query, args)
-                        results = cur.fetchall()[0][0]
-            except Exception as e:
-                print(f"DB Error: {e}")
-
-            #explicit do nothing on 1, we already have data no need to pull more
-            if results == 1:
-                previous_expirations.append(date)
-            #If result = 0, we need to pull data from the API
-            if results == 0:
-                try:
-                    self.options_api_pull_per_exp_date(ticker, target_date, date, conn_params, base_url=base_url)
-                    active_expirations.append(date)
-                    print(date, 0)
-                except Exception as e:
-                    print(e)
-                    print(date, "not in API")
-        return [previous_expirations, active_expirations]
-    
-    def calc_options_surface_for_date(self, ticker, target_date, conn_params, calculation_type, override_db = False, base_url = "http://127.0.0.1:25503/v3"):
-
-        #pulls all possible expiration dates from database
-        #Filters expirations before target date
-        #Checks if these already exist in database
-        #If they don't exist, tries to pull the data from the API
-        #If data is available in API, stores in database
-        #Returns list of expiration dates, containing those which are already in the database and those which are not in the database
-        #Can be further improved to remove some redundant Api calls (when you want to override implied vol, but don't need to pull the data.)
-        previous_dates, active_dates = self.iterate_through_expirations_load_data( ticker, target_date, conn_params, calculation_type, base_url=base_url)
-
-        #formatting datetypes to become strings, to match requirements for date module
-        previous_dates = [dt.datetime.strftime(date, "%Y-%m-%d") for date in previous_dates]
-        active_dates = [dt.datetime.strftime(date,"%Y-%m-%d") for date in active_dates]
-
-        # if override is true, calculates new Implied vols for all dates.
-        if override_db == True:
-            active_dates = previous_dates + active_dates
-        for date in active_dates:
-            #Calculates IVs and stores in database, depending on which calculation method is being used.
-            self.pull_data_and_calc_iv(ticker, target_date, date, conn_params, calculation_type)
-
-        return
     
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,
@@ -1117,55 +729,6 @@ class thetadata_options_scrape_EOD:
         return
 
 
-    
-def iterate_through_S_and_P_imp_vol(start_date, end_date,conn_params):
-    tickers = S_and_P_tickers(conn_params)
-
-    ticker_iterable = tickers.copy()
-    exists_query= '''SELECT DISTINCT ticker
-                        FROM stock_data
-                        WHERE ticker = ANY(%s)
-                        AND close IS NOT NULL;
-                        '''
-
-    #purging stock tickers that don't data
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            with conn.cursor() as cur:
-                for ticker in ticker_iterable:
-                    arguments = [ticker]
-                    cur.execute(exists_query,arguments)
-                    exists = cur.fetchone()[0]
-                    if not exists:
-                        tickers.remove(ticker)
-    except Exception as e:
-        print(e)
-
-
-
-
-
-"""
-def testing_polygon_api(ticker,client):
-    now = dt.datetime.utcnow()
-    thirty_min_ago = now - dt.timedelta(minutes=30)
-
-    from_date = thirty_min_ago.strftime("%Y-%m-%d")
-    to_date = now.strftime("%Y-%m-%d")
-
-    '''aggs = client.list_aggs(
-    ticker=ticker,
-    multiplier=1,          # 1-minute bars
-    timespan="minute",     # aggregate by minute
-    from_=from_date,
-    to=to_date,
-    adjusted=True,
-    limit=10)'''               # get up to 50 bars)
-
-    for contract in client.list_options_contracts("AAPL"):
-        print(contract.ticker)
-    
-    return """
 
 def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
     conn_params = {
@@ -1175,12 +738,8 @@ def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
         "password": os.getenv("DB_PASSWORD"),
         "port": "5432"
     }
-
-    docker_base_url = "http://host.docker.internal:25503/v3"
-    theta_nightly = thetadata_options_scrape_EOD()
-    for ticker in ticker_list:
-        theta_nightly.calc_options_surface_for_date(ticker,target_date,conn_params,"Binomial Tree", base_url=docker_base_url)
-        theta_nightly.calc_options_surface_for_date(ticker,target_date,conn_params,"Black Scholes", base_url=docker_base_url)
+    #will update this in future
+    pass
 
     return
     
@@ -1194,36 +753,20 @@ def main():
         "password": os.getenv("DB_PASSWORD"),
         "port": "5432"
     }
-    #load_dotenv()
-    #api_key0 = os.getenv("API_KEY")
-    #client = RESTClient(api_key = api_key0)
-    #contracts = client.list_options_contracts(underlying_ticker="AAPL", limit=100)
 
     
-
-    target_date = dt.datetime.strptime('2025-04-10', '%Y-%m-%d')
-    expiration_date = "2026-12-19"
     thetadata_test = thetadata_options_scrape_EOD()
 
-
-    #thetadata_test.options_api_pull_per_exp_date('AAPL',target_date,expiration_date,conn_params)
-    stock_range_start_date = target_date
-    stock_range_end_date = target_date + timedelta(days = 10)
     
     today = dt.datetime.today() - timedelta(days=1)
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
-
-    #thetadata_test.build_options_animation('XOM', one_mo_ago, medium_date,0.7, 1.3,'linear',"PUT",conn_params,'Binomial Tree' )
-
-    ''''LMT','OXY','GOOG', 'AAPL', 'NVDA','XOM', 'CVS', 'CVX', 'PLTR', NFLX'''
-    #thetadata_test.iterate_tickers(['AAPL'], today,today , conn_params)
     
-    end_date = dt.datetime.today() - timedelta(days=30)
-    start_date = dt.datetime.today() - timedelta(days = 320)
+    end_date = dt.datetime.today() - timedelta(days=1)
+    start_date = dt.datetime.today() - timedelta(days = 50)
     start_time = time.perf_counter()
-    thetadata_test.stream_options_into_db('PLTR',start_date, end_date, conn_params=conn_params)
-    thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'PLTR', start_date, end_date, 'Binomial Tree')
+    thetadata_test.stream_options_into_db('LMT',start_date, end_date, conn_params=conn_params)
+    thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'LMT', start_date, end_date, 'Binomial Tree')
     end_time = time.perf_counter()
     print("final time: ", end_time- start_time)
 
@@ -1232,7 +775,6 @@ def main():
     '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
                                                                                 conn_params)'''
     
-    #thetadata_test.iterate_through_expirations_load_data("AAPL",target_date,conn_params)
     '''
     thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Binomial Tree")
     thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Black Scholes")
