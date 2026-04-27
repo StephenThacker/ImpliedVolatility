@@ -728,8 +728,6 @@ class thetadata_options_scrape_EOD:
 
         return
 
-
-
 def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
     conn_params = {
         "host": "db",
@@ -743,8 +741,6 @@ def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
 
     return
     
-
-
 def main():
     conn_params = {
         "host": "localhost",
@@ -762,28 +758,13 @@ def main():
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
     
-    end_date = dt.datetime.today() - timedelta(days=1)
-    start_date = dt.datetime.today() - timedelta(days = 50)
+    end_date = dt.datetime.today() - timedelta(days=51)
+    start_date = dt.datetime.today() - timedelta(days = 350)
     start_time = time.perf_counter()
     thetadata_test.stream_options_into_db('LMT',start_date, end_date, conn_params=conn_params)
     thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'LMT', start_date, end_date, 'Binomial Tree')
     end_time = time.perf_counter()
     print("final time: ", end_time- start_time)
-
-
-
-    '''thetadata_test.pull_options_data_from_database_per_expiration('AAPL',target_date,expiration_date,\
-                                                                                conn_params)'''
-    
-    '''
-    thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Binomial Tree")
-    thetadata_test.calc_options_surface_for_date('NVDA',target_date,conn_params,"Black Scholes")
-    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','CALL', conn_params,"Black Scholes")
-
-    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Binomial Tree")
-    thetadata_test.plot_options_surface_from_database('NVDA', target_date, 0.2, 1.8,'linear','PUT', conn_params,"Black Scholes")'''
-
 
 if __name__ == "__main__":
     main()

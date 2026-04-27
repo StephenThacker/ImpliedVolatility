@@ -735,47 +735,13 @@ if __name__ == "__main__":
     "port": "5432"
     }
 
-    #add_imp_vol_columns_to_table(conn_params)
-    #store_interest_rates_in_db(conn_params)
-    #initialize_stock_data_table(conn_params)
-    #add_div_percentage_to_table(conn_params)
-    #one_time_dividend_update(conn_params)
-    #read_s_and_p_tickers_from_CSV(conn_params)
-    #load_expiration_dates_all_tickers(conn_params)
-    #store_nightly_interest_rate(conn_params)
-    
+
     start_date = '2018-01-01'
     soft_start_date = dt.datetime.strptime(start_date,"%Y-%m-%d") - timedelta(days = 700)
     soft_start_date = dt.datetime.strftime(soft_start_date.date(), "%Y-%m-%d")
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
-    #iterate_through_S_and_P_store_stock_values(soft_start_date, end_date, conn_params)
     iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
     iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params)
 
 
-
-
-    #store_interest_rates_in_db(conn_params)
-    #initalize_options_table(conn_params)
-    #start_date =  dt.datetime.today().date()-timedelta(days= 2)
-    #end_date = dt.datetime.today()
-    #end_date = dt.datetime.strftime(end_date, "%Y-%m-%d")
-    #start_date = dt.datetime.strftime(start_date, "%Y-%m-%d")
-    #load_expiration_dates_all_tickers(conn_params)
-    #store_interest_rates_in_db(conn_params)
-    #iterate_through_S_and_P_store_stock_values(conn_params, start_date, end_date)
-    #nightly_store_stock_price_for_S_and_P(conn_params,start_date,end_date)
-    #iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
-    #iterate_through_S_and_P_store_dividend_yields(start_date,end_date, conn_params)
-    #iterate_through_S_and_P_store_stock_values(conn_params)
-    #store_stock_price_history_yfinance('NVDA', conn_params )
-    #store_stock_dividends_yfinance("AAPL","2016-01-01","2026-06-04", conn_params)
-    #calculate_and_store_dividend_yields_database('NVDA', start_date, end_date, conn_params)
-    #target_date = dt.datetime.strptime('2026-02-05', '%Y-%m-%d')
-    #end_date = target_date + timedelta(days = 1)
-
-    #store_stock_price_history_yfinance('AAPL',conn_params)
-    #initalize_expirations_table()
-    #initalize_options_table(conn_params)
-    #initialize_general_market_data_table(conn_params)
