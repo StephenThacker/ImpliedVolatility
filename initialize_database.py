@@ -582,14 +582,10 @@ def iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params):
     except Exception as e:
         print(e)
     
-    print('1')
-    print(df.head())
-    print("2")
     tickers = df.iloc[-1].tolist()[0]
     print(tickers)
 
     for ticker in tickers:
-        print("3")
         store_stock_dividends_yfinance(ticker, start_date, end_date, conn_params=conn_params)
         print(ticker)
         #trying not to get rate limited by API
@@ -615,8 +611,10 @@ def S_and_P_tickers(conn_params):
 
 def nightly_store_stock_price_for_S_and_P(conn_params, start_date = None, end_date = None):
     if start_date is None and end_date is None:
-        start_date = dt.datetime.strftime(dt.datetime.today().date(), "%Y-%m-%d")
+        today = dt.datetime.today()
+        start_date = dt.datetime.strftime(today.date(), "%Y-%m-%d")
         end_date = start_date
+
     iterate_through_S_and_P_store_stock_values(start_date,end_date, conn_params)
 
     return
@@ -627,7 +625,7 @@ def store_nightly_interest_rate(conn_params):
         "https://markets.newyorkfed.org/read"
         "?productCode=50"
         "&eventCodes=520"
-        "&limit=1"
+        "&limit=30"
         "&startPosition=0"
         "&sort=postDt:-1"
         "&format=json"
@@ -637,31 +635,24 @@ def store_nightly_interest_rate(conn_params):
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-
         if not data.get("refRates"):
             raise ValueError("No SOFR data returned")
-
-        latest = data["refRates"][0]
-        effective_date = dt.datetime.strptime(latest["effectiveDate"], "%Y-%m-%d")
-        rate = latest["percentRate"]
 
         sql_insert = '''INSERT INTO market_data (date, risk_free_rate) VALUES (%s, %s)
                          ON CONFLICT (date) DO UPDATE SET
                          risk_free_rate = EXCLUDED.risk_free_rate'''
-        
-        args = [effective_date, rate]
+
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                for row in data['refRates']:
+                    rate = row['percentRate']
+                    effective_date = dt.datetime.strptime(row["effectiveDate"], "%Y-%m-%d")    
+                    args = [effective_date, rate]
+                    cur.execute(sql_insert, args)
+            conn.commit()
                         
     except Exception as e:
         print(e) 
-        return
-
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql_insert, args)
-            conn.commit()
-    except Exception as e:
-        print(e)
         return
 
     return
@@ -723,6 +714,7 @@ def nightly_routine(conn_params):
     if potential_day in nyse_holidays:
         print("not a market day")
         return
+    
     potential_day = dt.datetime.strftime(potential_day, "%Y-%m-%d")
     load_expiration_dates_all_tickers(conn_params,"http://host.docker.internal:25503/v3")
     store_nightly_interest_rate(conn_params)

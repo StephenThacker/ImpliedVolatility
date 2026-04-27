@@ -16,6 +16,8 @@ if __name__ == "__main__":
         "port": "5432"
     }
     tickers = ['AAPL', 'PLTR', 'CVX']
-    store_nightly_interest_rate(conn_params)
-    #nightly_routine(conn_params)
-    #theta_data_nightly_routine(tickers)
+    print("starting routine")
+    nightly_routine(conn_params)
+    print("stock data routine finished")
+    theta_data_nightly_routine(tickers)
+    print("implied vol routine finished")
