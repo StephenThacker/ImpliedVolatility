@@ -196,11 +196,11 @@ def initialize_stock_data_table(conn_params):
        date DATE,
        dividend DOUBLE PRECISION DEFAULT 0,
        div_yield_per DOUBLE PRECISION DEFAULT 0,
-       close DOUBLE PRECISION,
-       open DOUBLE PRECISION,
-       high DOUBLE PRECISION,
-       low DOUBLE PRECISION,
-       volume BIGINT,
+       close DOUBLE PRECISION DEFAULT 0,
+       open DOUBLE PRECISION DEFAULT 0,
+       high DOUBLE PRECISION DEFAULT 0,
+       low DOUBLE PRECISION DEFAULT 0,
+       volume BIGINT DEFAULT 0,
 
        PRIMARY KEY (ticker, date)
        )
@@ -630,7 +630,7 @@ def store_nightly_interest_rate(conn_params):
         "&sort=postDt:-1"
         "&format=json"
     )
-
+    print("!")
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -641,20 +641,19 @@ def store_nightly_interest_rate(conn_params):
         sql_insert = '''INSERT INTO market_data (date, risk_free_rate) VALUES (%s, %s)
                          ON CONFLICT (date) DO UPDATE SET
                          risk_free_rate = EXCLUDED.risk_free_rate'''
-
+        print("1")
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 for row in data['refRates']:
                     rate = row['percentRate']
-                    effective_date = dt.datetime.strptime(row["effectiveDate"], "%Y-%m-%d")    
+                    effective_date = dt.datetime.strptime(row["effectiveDate"], "%Y-%m-%d").date()
                     args = [effective_date, rate]
                     cur.execute(sql_insert, args)
             conn.commit()
-                        
     except Exception as e:
         print(e) 
         return
-
+    
     return
 def get_expiration_list_options_ticker(ticker, conn_params, base_url = "http://127.0.0.1:25503/v3" ):
     BASE_URL = base_url
@@ -716,7 +715,7 @@ def nightly_routine(conn_params):
         return
     
     potential_day = dt.datetime.strftime(potential_day, "%Y-%m-%d")
-    load_expiration_dates_all_tickers(conn_params,"http://host.docker.internal:25503/v3")
+    #load_expiration_dates_all_tickers(conn_params,"http://host.docker.internal:25503/v3")
     store_nightly_interest_rate(conn_params)
     nightly_store_stock_price_for_S_and_P(conn_params)
     iterate_through_S_and_P_store_dividends(potential_day,potential_day,conn_params)

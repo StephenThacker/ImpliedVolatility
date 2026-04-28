@@ -235,8 +235,12 @@ class thetadata_options_scrape_EOD:
         return date_list
     
 
-    def pull_risk_free_rate_database(self, cur, ticker:str, target_date: dt.datetime.date) -> float:
-        sql_query = '''SELECT risk_free_rate FROM market_data WHERE date = %s'''
+    def pull_risk_free_rate_database(self, cur, target_date: dt.datetime.date) -> float:
+        sql_query = sql_query = '''SELECT date, risk_free_rate 
+                                   FROM market_data 
+                                   WHERE date <= %s 
+                                   ORDER BY date DESC 
+                                   LIMIT 1'''
 
         args = [target_date]
         try:
@@ -244,8 +248,13 @@ class thetadata_options_scrape_EOD:
             row = cur.fetchone()
         except Exception as e:
             print(e)
+
+        pulled_date = row[0]
+
+        if pulled_date != target_date:
+            print("WARNING: risk free rate does not match today's date")
         
-        return row[0]/100
+        return row[1]/100
     
     def select_stock_data_for_pricing(self,cur, ticker:str, target_date: dt.datetime.date) -> float:
         sql_query = '''SELECT close, div_yield_per FROM stock_data WHERE ticker = %s AND date = %s'''
