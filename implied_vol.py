@@ -234,7 +234,9 @@ class thetadata_options_scrape_EOD:
     
         return date_list
     
-
+    
+    #Please note that risk free rate is updated at 8AM in the morning, the morning after the target date
+    #Therefore, for evaluating stocks during the same day, or night of, you have to use the previous day's rate.
     def pull_risk_free_rate_database(self, cur, target_date: dt.datetime.date) -> float:
         sql_query = sql_query = '''SELECT date, risk_free_rate 
                                    FROM market_data 
@@ -291,7 +293,7 @@ class thetadata_options_scrape_EOD:
                     print("No data found")
                     return
                 with conn.cursor() as cur:
-                    risk_free = self.pull_risk_free_rate_database(cur, ticker, target_date)
+                    risk_free = self.pull_risk_free_rate_database(cur, target_date)
                     stock_close, div_yield = self.select_stock_data_for_pricing(cur, ticker, target_date)
         except Exception as e:
             print(e)
@@ -471,9 +473,64 @@ class thetadata_options_scrape_EOD:
 
         except Exception as e:
             print(e)
-
-
     
+    def stream_stock_data_into_db(self, ticker:str, start_date:dt.datetime, end_date: dt.datetime, conn_params):
+        insert_sql = '''INSERT into stock_data(
+                        ticker, date, close, open, high, low, volume)
+                        VALUES %s
+                        ON CONFLICT (ticker, date) DO UPDATE SET
+                            CLOSE = EXCLUDED.close,
+                            OPEN = EXCLUDED.open,
+                            high = EXCLUDED.high,
+                            low = EXCLUDED.low,
+                            volume = EXCLUDED.volume;'''
+        batch_size = 1000
+        batch_list = []
+
+        try:
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    for row in self.stream_stock_data_thetadata(ticker, start_date, end_date):
+                        date = dt.datetime.strptime(row['created'].split('T')[0], "%Y-%m-%d")
+                        values = (ticker, date, row['close'], row['open'],row['high'], row['low'], row['volume'])
+                        batch_list.append(values)
+
+                        if len(batch_list) >= batch_size:
+                            execute_values(cur, insert_sql,batch_list)
+                            batch_list = [] 
+
+                    if batch_list:
+                        execute_values(cur,insert_sql,batch_list)
+
+        except Exception as e:
+            print(e)
+                        
+                    
+
+        return
+
+    #Base url needs to be different for Docker
+    def stream_stock_data_thetadata(self, ticker: str, start_date:dt.datetime, end_date:dt.datetime,\
+                                     base_url:str = "http://127.0.0.1:25503/v3" )->Iterator[dict[str, str]]:
+        
+        
+        start_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
+        end_date = dt.datetime.strftime(end_date.date(),"%Y%m%d")
+
+        ticker = ticker
+
+        BASE_URL = base_url
+
+        PARAMS = {'start_date': start_date, 'end_date':end_date, 'symbol':ticker, "expiration":"*"}
+
+        url = BASE_URL + '/stock/history/eod'
+
+        with httpx.stream("GET",url, params = PARAMS, timeout=60) as response:
+            response.raise_for_status()
+            lines = response.iter_lines()
+            reader = csv.DictReader(lines)
+
+            yield from reader  
     
 
     def plot_options_surface_from_database(self, ticker, target_date, low_strike_coef, high_str_coef, interp_method,
@@ -618,8 +675,8 @@ class thetadata_options_scrape_EOD:
             date_list.append(current)
             current += timedelta(days=1)
 
-        FIXED_LOGM_MIN = -0.5
-        FIXED_LOGM_MAX = 0.5
+        FIXED_LOGM_MIN = -1
+        FIXED_LOGM_MAX = 1
         FIXED_MAT_MIN  = 0
         FIXED_MAT_MAX  = 365
         FIXED_Z_MIN    = 0.0
@@ -723,19 +780,6 @@ class thetadata_options_scrape_EOD:
         return fig
 
 
-    def iterate_tickers(self, tickers, start_date, end_date, conn_params):
-        date_indx = start_date
-        dates_list = [] 
-        while date_indx <= end_date:
-            dates_list.append(date_indx)
-            date_indx = date_indx + timedelta(days = 1)
-        for date in dates_list:
-            for ticker in tickers:
-                self.calc_options_surface_for_date(ticker, date, conn_params, "Binomial Tree")
-                self.calc_options_surface_for_date(ticker, date, conn_params, "Black Scholes")
-
-
-        return
 
 def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
     conn_params = {
@@ -767,11 +811,12 @@ def main():
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
     
-    end_date = dt.datetime.today() - timedelta(days=51)
-    start_date = dt.datetime.today() - timedelta(days = 350)
+    end_date = dt.datetime.today() - timedelta(days=1)
+    start_date = dt.datetime.today() - timedelta(days = 100)
     start_time = time.perf_counter()
-    thetadata_test.stream_options_into_db('LMT',start_date, end_date, conn_params=conn_params)
-    thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'LMT', start_date, end_date, 'Binomial Tree')
+    thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
     end_time = time.perf_counter()
     print("final time: ", end_time- start_time)
 

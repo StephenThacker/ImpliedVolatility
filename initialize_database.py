@@ -76,26 +76,9 @@ def add_div_percentage_to_table(conn_params):
 
     return
 
-def one_time_dividend_update(conn_params):
-    sql_update_query = '''UPDATE stock_data
-       SET dividend = 0 WHERE dividend IS NULL'''
-    
-    sql_alter_query = '''ALTER TABLE stock_data
-       ALTER COLUMN dividend SET DEFAULT 0'''
-    
-    try:
-        with psycopg2.connect(**conn_params) as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql_update_query)
-                cur.execute(sql_alter_query)
-               
-                conn.commit()
 
-                
-    except Exception as e:
-        print(e)   
 
-    return
+
     
 
 def add_imp_vol_columns_to_table(conn_params):
@@ -630,7 +613,6 @@ def store_nightly_interest_rate(conn_params):
         "&sort=postDt:-1"
         "&format=json"
     )
-    print("!")
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -734,13 +716,11 @@ if __name__ == "__main__":
     "port": "5432"
     }
 
-
+    '''
     start_date = '2018-01-01'
     soft_start_date = dt.datetime.strptime(start_date,"%Y-%m-%d") - timedelta(days = 700)
     soft_start_date = dt.datetime.strftime(soft_start_date.date(), "%Y-%m-%d")
     end_date_dt = dt.datetime.today().date()
     end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
     iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
-    iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params)
-
-
+    iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params)'''

@@ -11,3 +11,5 @@
 10. Track largest losers and largest gainers, in a day. 
 11. Track short interest. 
 12. Rewrite UI in dash and include other stuff. 
+13. Email report to myself every day.
+14. Improve Stock data completeness

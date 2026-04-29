@@ -1,1 +1,1 @@
-35 17 * * 1-5 python3 /app/nightly_update.py
+20 20 * * 1-5 python3 /app/nightly_update.py

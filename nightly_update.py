@@ -16,6 +16,5 @@ if __name__ == "__main__":
         "port": "5432"
     }
     tickers = ['AAPL', 'PLTR', 'CVX']
-    print(conn_params)
     store_nightly_interest_rate(conn_params)
     print("routine finished")
