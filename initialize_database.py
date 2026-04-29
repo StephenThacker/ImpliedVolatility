@@ -16,7 +16,9 @@ import requests
 from psycopg2 import sql
 import httpx
 import csv
+from bs4 import BeautifulSoup
 import io
+import json
 
 
 
@@ -75,6 +77,19 @@ def add_div_percentage_to_table(conn_params):
         print(e)   
 
     return
+
+def alter_stock_data(conn_params):
+
+    SQL_command = """ALTER TABLE stock_data ADD COLUMN special_dividend DOUBLE PRECISION DEFAULT 0;"""
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(SQL_command)
+                conn.commit()
+        
+    except Exception as e:
+        print(e)
 
 
 
@@ -184,6 +199,7 @@ def initialize_stock_data_table(conn_params):
        high DOUBLE PRECISION DEFAULT 0,
        low DOUBLE PRECISION DEFAULT 0,
        volume BIGINT DEFAULT 0,
+       special_dividend DOUBLE PRECISION DEFAULT 0,
 
        PRIMARY KEY (ticker, date)
        )
@@ -670,6 +686,79 @@ def get_expiration_list_options_ticker(ticker, conn_params, base_url = "http://1
 
     return
 
+def scrape_finviz_dividend_json(ticker):
+    url = f"https://finviz.com/quote.ashx?t={ticker}&ta=1&p=d&ty=dv"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status() 
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        script_tag = soup.find('script', id='route-init-data')
+        
+        if not script_tag:
+            print("Could not find the script tag with id 'route-init-data'.")
+            return None, None
+            
+        json_text = script_tag.string
+        data = json.loads(json_text)
+        
+        dividends_data = data.get('dividendsData', [])
+        dividends_annual = data.get('dividendsAnnualData', [])
+        
+        df_dividends = pd.DataFrame(dividends_data)
+        df_annual = pd.DataFrame(dividends_annual)
+        
+        if not df_dividends.empty and 'Exdate' in df_dividends.columns:
+            df_dividends['Exdate'] = pd.to_datetime(df_dividends['Exdate'])
+            
+        return df_dividends, df_annual
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data from Finviz: {e}")
+        return None, None
+    except json.JSONDecodeError as e:
+        print(f"Error parsing the JSON data: {e}")
+        return None, None
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return None, None
+    
+def store_finviz_dividend(ticker, conn_params):
+
+    df_1, df_2 = scrape_finviz_dividend_json(ticker)
+
+    if df_1 is None or df_1.empty:
+        print("no dividend data avaiable for ",ticker)
+        return
+    
+    names_dict = {'Ticker': 'ticker', 'Exdate': 'date', 'Ordinary':'dividend', 'Special':'special_dividend'}
+
+    df_1 = df_1.rename(columns=names_dict)
+
+    iterator = df_1.itertuples(index= False, name = None)
+
+
+    sql_query = '''INSERT INTO stock_data (ticker,date, dividend, special_dividend) VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (ticker, date) DO UPDATE SET dividend = EXCLUDED.dividend, 
+                   special_dividend = EXCLUDED.special_dividend'''
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                for row in iterator:
+                    print('row', row)
+                    cur.execute(sql_query, row)
+    except Exception as e:
+        print(e)
+
+
+
 def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:25503/v3"):
     tickers = S_and_P_tickers(conn_params)
     for ticker in tickers:
@@ -715,6 +804,9 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
+
+    #df1, df2 = scrape_finviz_dividend_json("BKE")
+    store_finviz_dividend("MMM", conn_params)
 
     '''
     start_date = '2018-01-01'
