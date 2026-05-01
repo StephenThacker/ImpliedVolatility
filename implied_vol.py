@@ -779,6 +779,13 @@ class thetadata_options_scrape_EOD:
         )
         return fig
 
+    def scrape_stock_data_theta_data_S_and_P(self, start_date, end_date,conn_params):
+        tickers = S_and_P_tickers(conn_params)
+        for ticker in tickers:
+            time.sleep(0.1)
+            print(ticker)
+            self.stream_stock_data_into_db(ticker, start_date,end_date,conn_params)
+        return
 
 
 def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
@@ -811,14 +818,14 @@ def main():
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
     
-    end_date = dt.datetime.today() - timedelta(days=1)
-    start_date = dt.datetime.today() - timedelta(days = 100)
-    start_time = time.perf_counter()
-    thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
-    thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
-    thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
-    end_time = time.perf_counter()
-    print("final time: ", end_time- start_time)
+    end_date = dt.datetime.today()
+    start_date = dt.datetime.today() - timedelta(days = 360)
+    thetadata_test.scrape_stock_data_theta_data_S_and_P(start_date, end_date, conn_params)
+    #thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    #thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    #thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
+    #end_time = time.perf_counter()
+    #print("final time: ", end_time- start_time)
 
 if __name__ == "__main__":
     main()

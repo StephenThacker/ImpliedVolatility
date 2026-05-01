@@ -18,6 +18,7 @@ import httpx
 import csv
 from bs4 import BeautifulSoup
 import io
+import random
 import json
 
 
@@ -540,7 +541,6 @@ def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_para
         calculate_and_store_dividend_yields_database(ticker,start_date, end_date,conn_params=conn_params)
         print(ticker)
         #trying not to get rate limited by API
-        time.sleep(0.5)
     return
 
 
@@ -758,6 +758,19 @@ def store_finviz_dividend(ticker, conn_params):
         print(e)
 
 
+def scrape_finviz_for_dividend_data(conn_params):
+
+    tickers = S_and_P_tickers(conn_params)
+    for ticker in tickers:
+        time.sleep(random.uniform(4,12))
+        try:
+            store_finviz_dividend(ticker, conn_params)
+        except Exception as e:
+            print(e)
+        print(ticker)
+
+
+
 
 def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:25503/v3"):
     tickers = S_and_P_tickers(conn_params)
@@ -806,7 +819,12 @@ if __name__ == "__main__":
     }
 
     #df1, df2 = scrape_finviz_dividend_json("BKE")
-    store_finviz_dividend("MMM", conn_params)
+
+    scrape_finviz_for_dividend_data(conn_params)
+    print("finviz routine finished")
+
+    #iterate_through_S_and_P_store_dividend_yields()
+
 
     '''
     start_date = '2018-01-01'
