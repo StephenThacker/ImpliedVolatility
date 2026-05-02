@@ -20,7 +20,8 @@ from bs4 import BeautifulSoup
 import io
 import random
 import json
-
+import simfin as sf
+from simfin.names import *
 
 
 
@@ -28,6 +29,8 @@ import json
 #i.e., pull interest rates from CSV file and store in database
 
 load_dotenv()
+sf.set_api_key(os.getenv('SIM_FIN_KEY'))
+sf.set_data_dir(r'C:\Users\steph\Desktop\Coding\SimFin')
 
 
 def read_s_and_p_tickers_from_CSV(conn_params):
@@ -784,6 +787,9 @@ def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:
 
     return
 
+
+
+
 def nightly_routine(conn_params):
     #adding logic for testing
     potential_day = dt.datetime.today()
@@ -818,10 +824,24 @@ if __name__ == "__main__":
     "port": "5432"
     }
 
+
+    print(sf.__version__)
+    income = sf.load(dataset='income', variant='quarterly', market='us')
+    balance = sf.load(dataset='balance', variant='quarterly', market='us')
+    cashflow = sf.load(dataset='cashflow', variant = 'quarterly', market = 'us')
+    share_prices = sf.load(dataset = 'shareprices', variant = 'daily', market = 'us')
+    print("printing dividends")
+    print("columns",share_prices.columns)
+    print(share_prices[(share_prices['Ticker']=='AAPL')&(share_prices['Dividend'].notna())][['Date','Close','Dividend']].tail())
+
+    aapl_div = cashflow[cashflow['Ticker'] == 'AAPL'][['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].sort_values('Report Date')
+    aapl_div = aapl_div.assign(Dividends_Paid_USD = aapl_div['Dividends Paid']/1_000_000)
+    print(aapl_div[['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].tail(12))
+
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 
-    scrape_finviz_for_dividend_data(conn_params)
-    print("finviz routine finished")
+    #scrape_finviz_for_dividend_data(conn_params)
+    #print("finviz routine finished")
 
     #iterate_through_S_and_P_store_dividend_yields()
 

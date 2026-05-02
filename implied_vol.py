@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+import yfinance as yf
 from scipy.optimize import brentq
 import plotly.graph_objects as go
 import datetime as dt
@@ -418,6 +419,10 @@ class thetadata_options_scrape_EOD:
         self.iv_calculation(options_data, conn_params, calculation_type)
 
         return
+    
+    def _format_options_ticker_for_API(self,ticker:str) -> str:
+        #Removes decimals from strings, because ThetaData API does not have any tickers with decimals for options contracts
+        return ticker.replace('.',"")
        
     
 
@@ -428,7 +433,7 @@ class thetadata_options_scrape_EOD:
         
         start_date = dt.datetime.strftime(start_date.date(),"%Y%m%d")
         end_date = dt.datetime.strftime(end_date.date(),"%Y%m%d")
-        ticker = ticker
+        ticker = self._format_options_ticker_for_API(ticker)
 
         BASE_URL = base_url
 
@@ -443,7 +448,8 @@ class thetadata_options_scrape_EOD:
 
             yield from reader
 
-    def stream_options_into_db(self,ticker:str,  start_date: dt.datetime = dt.datetime.today(), end_date:dt.datetime = dt.datetime.today(), conn_params = None):
+    def stream_options_into_db(self,ticker:str,  start_date: dt.datetime = dt.datetime.today(), end_date:dt.datetime = dt.datetime.today(), conn_params = None,
+                               base_url:str = "http://127.0.0.1:25503/v3"):
         
         insert_sql = '''INSERT INTO options (
         ticker, expiration, strike, option_type, price_date,\
@@ -458,8 +464,8 @@ class thetadata_options_scrape_EOD:
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
-                    for row in self.options_api_pull_refactored(ticker,start_date, end_date):
-                        values = (row['symbol'],row['expiration'],row['strike'],row['right'],row['created'],\
+                    for row in self.options_api_pull_refactored(ticker,start_date, end_date, base_url):
+                        values = (ticker,row['expiration'],row['strike'],row['right'],row['created'],\
                                    row['open'], row['high'], row['low'], row['close'], row['volume'], row['count'],\
                                      row['bid_size'], row['bid'],row['ask_size'], row['ask'], ((float(row['ask'])+float(row['bid']))/2) )
                         batch_list.append(values)
@@ -471,10 +477,14 @@ class thetadata_options_scrape_EOD:
                     if batch_list:
                         execute_values(cur,insert_sql,batch_list)
 
+            return True
+
         except Exception as e:
             print(e)
+            return False
     
-    def stream_stock_data_into_db(self, ticker:str, start_date:dt.datetime, end_date: dt.datetime, conn_params):
+    def stream_stock_data_into_db(self, ticker:str, start_date:dt.datetime, end_date: dt.datetime, conn_params,\
+                                   base_url:str = "http://127.0.0.1:25503/v3"):
         insert_sql = '''INSERT into stock_data(
                         ticker, date, close, open, high, low, volume)
                         VALUES %s
@@ -490,7 +500,7 @@ class thetadata_options_scrape_EOD:
         try:
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
-                    for row in self.stream_stock_data_thetadata(ticker, start_date, end_date):
+                    for row in self.stream_stock_data_thetadata(ticker, start_date, end_date, base_url):
                         date = dt.datetime.strptime(row['created'].split('T')[0], "%Y-%m-%d")
                         values = (ticker, date, row['close'], row['open'],row['high'], row['low'], row['volume'])
                         batch_list.append(values)
@@ -502,8 +512,11 @@ class thetadata_options_scrape_EOD:
                     if batch_list:
                         execute_values(cur,insert_sql,batch_list)
 
+                return True
+
         except Exception as e:
             print(e)
+            return False
                         
                     
 
@@ -779,27 +792,42 @@ class thetadata_options_scrape_EOD:
         )
         return fig
 
-    def scrape_stock_data_theta_data_S_and_P(self, start_date, end_date,conn_params):
+    def scrape_stock_data_theta_data_S_and_P(self, start_date:dt.datetime, end_date:dt.datetime,conn_params: dict['str','str'],\
+                                             base_url:str = "http://127.0.0.1:25503/v3"):
         tickers = S_and_P_tickers(conn_params)
+        failed_tickers = []
         for ticker in tickers:
-            time.sleep(0.1)
+            #Pause to avoid API rate limit
+            time.sleep(0.06)
             print(ticker)
-            self.stream_stock_data_into_db(ticker, start_date,end_date,conn_params)
+            success = self.stream_stock_data_into_db(ticker, start_date,end_date,conn_params, base_url)
+            if not success:
+                failed_tickers.append(ticker)
+                print("added ", ticker," to failed_tickers")
+        return
+    
+    
+    def scrape_options_data_theta_data_S_and_P(self, start_date: dt.datetime, end_date: dt.datetime, conn_params: dict['str','str'],\
+                                               base_url:str = "http://127.0.0.1:25503/v3"):
+        tickers = S_and_P_tickers(conn_params)
+        failed_tickers = []
+        for ticker in tickers:
+            #Pause to avoid API rate limit
+            time.sleep(0.06)
+            print(ticker)
+            success = self.stream_options_into_db(ticker, start_date, end_date,conn_params, base_url)
+            #Theta data seems to parse options tickers differently than stock tickers in the situation where 
+            #stock tickers have a "." in the ticker. For example, BRK.B is "BRK.B" for the stock API, but
+            #"BRKB" for the options API. So, for any stock ticker that fails, we retry the request again, parsing out the "."
+            if not success:
+                if ticker == 'NVR':
+                    print('NVR is an exception and has no options contracts')
+                else:
+                    failed_tickers.append(ticker)
+                    print("added ", ticker," to failed_tickers")
+
         return
 
-
-def theta_data_nightly_routine(ticker_list, target_date = dt.datetime.today()):
-    conn_params = {
-        "host": "db",
-        "database": os.getenv("DB_NAME"),
-        "user": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-        "port": "5432"
-    }
-    #will update this in future
-    pass
-
-    return
     
 def main():
     conn_params = {
@@ -818,9 +846,13 @@ def main():
     one_mo_ago = today - timedelta(days=5)
     medium_date = one_mo_ago + timedelta(days= 15)
     
-    end_date = dt.datetime.today()
+    end_date = dt.datetime.today() - timedelta(days=1)
     start_date = dt.datetime.today() - timedelta(days = 360)
-    thetadata_test.scrape_stock_data_theta_data_S_and_P(start_date, end_date, conn_params)
+    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
+    end_date = start_date
+    start_date = end_date - timedelta(days=360)
+    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
+
     #thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
     #thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
     #thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
