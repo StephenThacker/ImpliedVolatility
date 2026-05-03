@@ -448,6 +448,10 @@ class thetadata_options_scrape_EOD:
 
             yield from reader
 
+    
+
+    #can potentially move db connection to outside the loop of S&P tickers, which would make it faster.
+    #Probably worth doing, if I move from 500 tickers to a few thousand.
     def stream_options_into_db(self,ticker:str,  start_date: dt.datetime = dt.datetime.today(), end_date:dt.datetime = dt.datetime.today(), conn_params = None,
                                base_url:str = "http://127.0.0.1:25503/v3"):
         
@@ -825,6 +829,10 @@ class thetadata_options_scrape_EOD:
                 else:
                     failed_tickers.append(ticker)
                     print("added ", ticker," to failed_tickers")
+
+        return
+    
+    def one_time_script_load_options_stock_data(self,start_date:dt.datetime, end_date:dt.datetime, conn_params:dict[str,str], base_url: str = "http://127.0.0.1:25503/v3" ):
 
         return
 

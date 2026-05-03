@@ -15,8 +15,8 @@ if __name__ == "__main__":
         "password": os.getenv("DB_PASSWORD"),
         "port": "5432"
     }
-    today = dt.datetime.today() - timedelta(days=1)
-    one_month_ago = today - timedelta(days= 1)
+    today = dt.datetime.today()
+    one_week_ago = today - timedelta(days= 5)
 
     options_scrape = thetadata_options_scrape_EOD()
 
@@ -25,8 +25,8 @@ if __name__ == "__main__":
 
     store_nightly_interest_rate(conn_params)
     print("interest rate routine finished")
-    options_scrape.scrape_stock_data_theta_data_S_and_P(one_month_ago,today,conn_params, base_url= "http://host.docker.internal:25503/v3")
+    options_scrape.scrape_stock_data_theta_data_S_and_P(one_week_ago,today,conn_params, base_url= "http://host.docker.internal:25503/v3")
     print("stock data scrape finished")
-    options_scrape.scrape_options_data_theta_data_S_and_P(one_month_ago,today,conn_params, base_url= "http://host.docker.internal:25503/v3")
+    options_scrape.scrape_options_data_theta_data_S_and_P(one_week_ago,today,conn_params, base_url= "http://host.docker.internal:25503/v3")
     print("options data scrape finished")
 

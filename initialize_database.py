@@ -32,6 +32,20 @@ load_dotenv()
 sf.set_api_key(os.getenv('SIM_FIN_KEY'))
 sf.set_data_dir(r'C:\Users\steph\Desktop\Coding\SimFin')
 
+def add_outstanding_shares_column(conn_params):
+    alter_query = '''ALTER TABLE stock_data
+                     ADD COLUMN IF NOT EXISTS shares_outstanding BIGINT'''
+    
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(alter_query)
+                conn.commit()
+    except Exception as e:
+        print(e)
+
+    return
+
 
 def read_s_and_p_tickers_from_CSV(conn_params):
 
@@ -204,6 +218,8 @@ def initialize_stock_data_table(conn_params):
        low DOUBLE PRECISION DEFAULT 0,
        volume BIGINT DEFAULT 0,
        special_dividend DOUBLE PRECISION DEFAULT 0,
+       outstanding_shares BIGINT DEFAULT 0,
+
 
        PRIMARY KEY (ticker, date)
        )
@@ -824,19 +840,8 @@ if __name__ == "__main__":
     "port": "5432"
     }
 
-
-    print(sf.__version__)
-    income = sf.load(dataset='income', variant='quarterly', market='us')
-    balance = sf.load(dataset='balance', variant='quarterly', market='us')
-    cashflow = sf.load(dataset='cashflow', variant = 'quarterly', market = 'us')
-    share_prices = sf.load(dataset = 'shareprices', variant = 'daily', market = 'us')
-    print("printing dividends")
-    print("columns",share_prices.columns)
-    print(share_prices[(share_prices['Ticker']=='AAPL')&(share_prices['Dividend'].notna())][['Date','Close','Dividend']].tail())
-
-    aapl_div = cashflow[cashflow['Ticker'] == 'AAPL'][['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].sort_values('Report Date')
-    aapl_div = aapl_div.assign(Dividends_Paid_USD = aapl_div['Dividends Paid']/1_000_000)
-    print(aapl_div[['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].tail(12))
+    
+    add_outstanding_shares_column(conn_params)
 
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 

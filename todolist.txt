@@ -1,15 +1,17 @@
 #to do list
 1. Update binomial tree model include dividends in the model
-2. API implied vol could run tickers in parallel, to maximize speed.
-3. Scrape nightly S&P 500 data
-4. Refactor stock data pipeline to get stock data from S&P 500
+2. Deferred:~~Not necessary at this time. API implied vol could run tickers in parallel, to maximize speed.~~
+3. ~~Scrape nightly S&P 500 data~~
+4. ~~Refactor stock data pipeline to get stock data from S&P 500~~
 5. Update UI to dash
-6. Probability distributions for butterfly calls
+6. Probability distributions from butterfly calls
 7. Start tracking S&P 500 index changes, daily and also write a script that updates the past with the changes.. 
-8. Get stock data from ThetaData API
+8. ~~Get stock data from ThetaData API~~
 9. Calculate Market Dispersion & Correlation
 10. Track largest losers and largest gainers, in a day. 
 11. Track short interest. 
 12. Rewrite UI in dash and include other stuff. 
 13. Email report to myself every day.
 14. Improve Stock data completeness
+15. Get better dividend stock data from SimFin
+16. Port over balance sheet and income statement data for US companies from Simfin.
