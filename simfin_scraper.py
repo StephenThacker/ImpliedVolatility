@@ -22,6 +22,7 @@ import random
 import json
 import simfin as sf
 from simfin.names import *
+from utils import S_and_P_tickers
 
 
 load_dotenv()
@@ -33,17 +34,16 @@ def iterate_simfin(start_date:dt.datetime.date = dt.datetime.today().date(), end
     df = sf.load(dataset = 'shareprices', variant = 'daily', market = 'us', refresh_days = 1)
 
     df['Date'] = pd.to_datetime(df['Date'])
-
-    df_div = scrape_simfin_dividends(df,start_date,end_date, conn_params)
-    print(df_div.columns)
-    shares_df = scrape_simfin_outstanding_shares(df, start_date, end_date, conn)
-    print(shares_df.columns)
-
+    #Need to update S_and_P_tickers function at a later date
+    tickers = S_and_P_tickers()
     with psycopg2.connect(**conn_params) as conn:
         with conn.cursor() as cur:
-            store_dividends_in_database(cur, df_div, start_date, end_date, conn_params)
-            store_outstanding_shares_in_database(cur, shares_df,)
-
+            for ticker in tickers:
+                print(ticker)
+                df_div = scrape_simfin_dividends(df, ticker, start_date,end_date)
+                shares_df = scrape_simfin_outstanding_shares(df, ticker, start_date, end_date)
+                store_dividends_in_database(cur, df_div)
+                store_outstanding_shares_in_database(cur,shares_df)
     return
 
 #Scrape dividend yields per date range. Gives Dividend in terms of dollars
@@ -51,7 +51,7 @@ def scrape_simfin_dividends(df: pd.DataFrame, ticker:str, start_date:dt.datetime
                              end_date:dt.datetime.date = dt.datetime.today().date()) -> pd.DataFrame:
 
     df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date) & (df['Ticker'] == ticker) & (df['Dividend'].notna())]
-    df = df[['Date','Dividend']]
+    df = df[['Date','Ticker', 'Dividend']]
 
     return df
 
@@ -59,32 +59,35 @@ def scrape_simfin_outstanding_shares(df: pd.DataFrame, ticker: str, start_date: 
                                       end_date:dt.datetime.date = dt.datetime.today().date()) -> pd.DataFrame:
     
     df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date) & (df['Ticker'] == ticker)]
-    df = df[['Date','Close']]
+    df = df[['Date','Ticker', 'Shares Outstanding' ]]
 
     return df
 
-def store_dividends_in_database(cur, df:pd.DataFrame,ticker:str, start_date: dt.datetime.date = dt.datetime.today().date(),\
-                                end_date:dt.datetime.date = dt.datetime.today().date(), conn_params = None):
+def store_dividends_in_database(cur, df:pd.DataFrame):
+        
+    sql_insert = '''INSERT INTO stock_data (date, ticker, dividend ) VALUES (%s, %s, %s) 
+                    ON CONFLICT (date,ticker) DO UPDATE SET
+                    dividend = EXCLUDED.dividend'''
     
-    sql_insert = '''INSERT INTO stock_data (date, ticker, dividend )'''
-    
-    pandas_generator = df.itertuples(index=False, name=None)
+    dividend_list = list(df.itertuples(index=False, name=None))
 
     try:
-        for row in pandas_generator:
-            cur.execute()
+        psycopg2.extras.execute_values(cur, sql_insert, dividend_list, page_size=2000)
     except Exception as e:
-        print(e)
+        print("Error storing dividends:", e)
                 
 
 
-def store_outstanding_shares_in_database(cur, df:pd.DataFrame, start_date: dt.datetime.date = dt.datetime.today().date(),\
-                                end_date:dt.datetime.date = dt.datetime.today().date(), conn_params = None):
-    pandas_generator = df.itertuples(index=False, name = None)
-    try:
-        for row in pandas_generator:
-            cur.execute()
+def store_outstanding_shares_in_database(cur, df:pd.DataFrame):
+    
+    sql_insert = '''INSERT INTO stock_data (date, ticker, shares_outstanding) VALUES (%s, %s, %s)
+                    ON CONFLICT (date, ticker) DO UPDATE SET
+                    shares_outstanding = EXCLUDED.shares_outstanding'''
 
+    shares_outstanding_list = list(df.itertuples(index=False, name = None))
+
+    try:
+        psycopg2.extras.execute_values(cur,sql_insert, shares_outstanding_list)
     except Exception as e:
         print(e)
 
@@ -97,16 +100,17 @@ if __name__ == "__main__":
     "port": "5432"
     }
     print(sf.__version__)
-    income = sf.load(dataset='income', variant='quarterly', market='us')
-    balance = sf.load(dataset='balance', variant='quarterly', market='us')
-    cashflow = sf.load(dataset='cashflow', variant = 'quarterly', market = 'us')
-    share_prices = sf.load(dataset = 'shareprices', variant = 'daily', market = 'us')
-    
-    '''
-    print("printing dividends")
-    print("columns",share_prices.columns)
-    print(share_prices[(share_prices['Ticker']=='AAPL')&(share_prices['Dividend'].notna())][['Date','Close','Dividend']].tail())
+    income = sf.load(dataset='income', variant='quarterly', market='us',refresh_days = 1)
+    balance = sf.load(dataset='balance', variant='quarterly', market='us',refresh_days = 1)
+    cashflow = sf.load(dataset='cashflow', variant = 'quarterly', market = 'us',refresh_days = 1)
+    share_prices = sf.load(dataset = 'shareprices', variant = 'daily', market = 'us',refresh_days = 1)
+    start_date =  dt.datetime.today()-timedelta(days=365)
+    end_date = dt.datetime.today() - timedelta(days=300)
+    #iterate_simfin(start_date = start_date, end_date = end_date)
 
-    aapl_div = cashflow[cashflow['Ticker'] == 'AAPL'][['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].sort_values('Report Date')
-    aapl_div = aapl_div.assign(Dividends_Paid_USD = aapl_div['Dividends Paid']/1_000_000)
-    print(aapl_div[['Report Date','Publish Date','Restated Date', 'Dividends Paid','Shares (Basic)']].tail(12))'''
+    print(share_prices.columns)
+    share_prices['Date'] = pd.to_datetime(share_prices['Date'])
+    print(share_prices[
+        (share_prices['Date'] >= dt.datetime.today() - timedelta(days=700)) &\
+        (share_prices['Ticker'] == 'BKE') &\
+        (share_prices['Dividend'].notna())])
