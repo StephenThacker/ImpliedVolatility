@@ -99,13 +99,13 @@ def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime = None, end_
     if not end_date:
         end_date = dt.datetime.today()
 
+    successful_tickers  = []
     try:
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 for ticker in tickers:
                     print(ticker)
                     time.sleep(3)
-                    print("1")
                     try:
                         results = scrape_dividend_data(ticker, start_date, end_date)
                     except Exception as e:
@@ -114,14 +114,15 @@ def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime = None, end_
                         time.sleep(30)
                         results = scrape_dividend_data(ticker, start_date, end_date)
                         print(ticker, "retry completed successfully")
-                    print("2")
                     store_divs_in_database_polyio(cur, ticker, results)
-                    print('3')
+                    if results['results']:
+                        successful_tickers.append(ticker)
 
     except Exception as e:
         print("falled to pull dividend: ", e)
+    
+    return tickers
 
-    pass
 
 
 
