@@ -16,7 +16,7 @@ if __name__ == "__main__":
         "port": "5432"
     }
     today = dt.datetime.today()
-    one_week_ago = today - timedelta(days= 5)
+    one_week_ago = today - timedelta(days= 20)
 
     options_scrape = thetadata_options_scrape_EOD()
 

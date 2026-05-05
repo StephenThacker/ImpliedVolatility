@@ -14,9 +14,9 @@ from typing import Dict
 import holidays
 import httpx
 from psycopg2 import sql
-import httpx
 import csv
 from bs4 import BeautifulSoup
+from collections import defaultdict
 import io
 import random
 import json
@@ -27,11 +27,8 @@ load_dotenv()
 def scrape_short_interest_data():
     return
 
-def scrape_dividend_data(ticker, start_date, end_date, conn_params):
-    url = "https://api.massive.com/stocks/v1/dividends"
 
-
-def scrape_dividend_data(ticker: str, start_date: dt.datetime = None, end_date: dt.datetime = None):
+def scrape_dividend_data(ticker: str, start_date: dt.datetime = None, end_date: dt.datetime = None)->Dict:
 
     if not start_date:
         start_date = dt.datetime.today()
@@ -57,42 +54,85 @@ def scrape_dividend_data(ticker: str, start_date: dt.datetime = None, end_date: 
     if response.status_code == 200:
         return response.json()
     else:
-        raise Exception(f"API request failed with status {response.status_code}: {response.text}")
+        print("Pull failed")
+        print(response.status_code,": ", response.text)
 
 
-def store_divs_in_database_polyio(cur,ticker, df:pd.DataFrame):
+def store_divs_in_database_polyio(cur,ticker, results: Dict):
+
+    results = results['results']
+
+    dividend_dict = defaultdict(float)
+
+    for row in results:
+        key = (row['ex_dividend_date'], row['ticker'])
+        amount = float(row['cash_amount'])
+        dividend_dict[key] += amount
+
+    dividend_list = [(date_val,tkr,amount) for (date_val,tkr), amount in dividend_dict.items()]
+
         
     sql_insert = '''INSERT INTO stock_data (date, ticker, dividend ) VALUES %s
                     ON CONFLICT (date,ticker) DO UPDATE SET
                     dividend = EXCLUDED.dividend'''
     
-    dividend_list = list(df.itertuples(index=False, name=None))
 
     if dividend_list:
         try:
             psycopg2.extras.execute_values(cur, sql_insert, dividend_list, page_size=2000)
-            #print(ticker, ": stored dividends")
         except Exception as e:
             print("Error storing dividends:", e)
     else:
         print(ticker, " No dividends found")
 
 
-def pull_poly_io_data_per_ticker(ticker, conn_params):
+    #manaul_test_query = '''SELECT date,ticker, dividend FROM stock_data WHERE ticker = %s AND dividend > 0 ORDER by date DESC LIMIT 10'''
 
-    pass
 
-def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime, end_date:dt.datetime):
-    tickers = S_and_P_tickers()
-    
+
+
+def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime = None, end_date:dt.datetime = None):
+
+    tickers = S_and_P_tickers(conn_params)
+    if not start_date:
+        start_date = dt.datetime.today()
+    if not end_date:
+        end_date = dt.datetime.today()
+
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                for ticker in tickers:
+                    print(ticker)
+                    time.sleep(3)
+                    print("1")
+                    try:
+                        results = scrape_dividend_data(ticker, start_date, end_date)
+                    except Exception as e:
+                        print(e)
+                        print("trying again")
+                        time.sleep(30)
+                        results = scrape_dividend_data(ticker, start_date, end_date)
+                        print(ticker, "retry completed successfully")
+                    print("2")
+                    store_divs_in_database_polyio(cur, ticker, results)
+                    print('3')
+
+    except Exception as e:
+        print("falled to pull dividend: ", e)
 
     pass
 
 
 
 if __name__ == "__main__":
-    start_date = dt.datetime.today() - timedelta(days=365)
-    end_date = dt.datetime.today() - timedelta(days = 30)
-    results = scrape_dividend_data('AAPL', start_date, end_date)
-    for row in results['results']:
-        print(row['pay_date'],row['cash_amount'])
+    conn_params = {
+    "host": "localhost",
+    "database": os.getenv("DB_NAME"),
+    "user": os.getenv("DB_USER"),
+    "password": os.getenv("DB_PASSWORD"),
+    "port": "5432"
+    }
+    start_date = dt.datetime.today() - timedelta(days=1500)
+    end_date = dt.datetime.today() - timedelta(days = 1)
+    pull_div_data_poly_for_all(conn_params, start_date, end_date)
