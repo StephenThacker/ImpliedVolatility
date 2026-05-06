@@ -105,15 +105,25 @@ def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime = None, end_
             with conn.cursor() as cur:
                 for ticker in tickers:
                     print(ticker)
-                    time.sleep(3)
+                    time.sleep(0.1)
                     try:
                         results = scrape_dividend_data(ticker, start_date, end_date)
                     except Exception as e:
                         print(e)
                         print("trying again")
                         time.sleep(30)
-                        results = scrape_dividend_data(ticker, start_date, end_date)
-                        print(ticker, "retry completed successfully")
+                        try:
+                            results = scrape_dividend_data(ticker, start_date, end_date)
+                            print(ticker, "retry completed successfully")
+                        except:
+                            time.sleep(120)
+                            print("trying one last time")
+                            try:
+                                results = scrape_dividend_data(ticker, start_date, end_date)
+                            except:
+                                print("couldn't get it to work, continuing")
+                                continue
+                            print(ticker, "retry completed successfully")
                     store_divs_in_database_polyio(cur, ticker, results)
                     if results['results']:
                         successful_tickers.append(ticker)
@@ -134,6 +144,6 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-    start_date = dt.datetime.today() - timedelta(days=1500)
+    start_date = dt.datetime.today() - timedelta(days=5000)
     end_date = dt.datetime.today() - timedelta(days = 1)
     pull_div_data_poly_for_all(conn_params, start_date, end_date)

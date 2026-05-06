@@ -237,11 +237,21 @@ def initialize_stock_data_table(conn_params):
 
     return
 
+def get_S_and_P_master(conn_params):
+
+    return
+
+
+#S&P Master is a master list of the S and P, it's a starting point
+# We scrape changes to the S & P and these are used to determine the S&P and any time before or after the Master
+
 def initialize_general_market_data_table(conn_params):
     create_table = '''CREATE TABLE IF NOT EXISTS market_data (
        date DATE,
        risk_free_rate DOUBLE PRECISION,
        S_and_P_tickers TEXT[],
+       S_and_P__master TEXT[] DEFAULT NONE,
+       S_and_P_changes TEXT[] DEFAULT NONE,
        
        PRIMARY KEY (date)
        )
@@ -469,10 +479,18 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
     if results == 0:
         print("no stock data for ticker")
         return
+    
+    if type(start_date) == 'str':
+        start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date() - timedelta(days=400)
 
-    start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date() - timedelta(days=400)
+    if type(end_date) == 'str':
+        end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
 
-    end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
+    if type(start_date) == dt.datetime or type(end_date)==dt.datetime:
+        start_date_dt = start_date_dt - timedelta(days = 400)
+        start_date_dt = start_date_dt.date()
+        end_date_dt = end_date.date()
+
     
 
     #pull stock data query
@@ -788,6 +806,90 @@ def scrape_finviz_for_dividend_data(conn_params):
             print(e)
         print(ticker)
 
+def get_sp500_constituents_master(
+    url: str = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies") -> list[str]:
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/129.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    response = requests.get(url, headers=headers, timeout=15)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Find the table immediately after "S&P 500 component stocks" heading
+    heading = soup.find(
+        "span",
+        class_="mw-headline",
+        string=lambda text: text and "S&P 500 component stocks" in text,
+    )
+
+    if heading:
+        table = heading.find_next("table")
+    else:
+        # Robust fallback using the official table ID
+        table = soup.find("table", {"id": "constituents"})
+
+    if not table:
+        raise ValueError("Could not find the S&P 500 constituents table on the page.")
+
+    tickers: list[str] = []
+    # Skip the header row (first <tr>)
+    for row in table.find_all("tr")[1:]:
+        cells = row.find_all("td")
+        if not cells:
+            continue
+
+        # The ticker is in the first <td>, inside an <a class="external text"> link
+        ticker_cell = cells[0]
+        ticker_link = ticker_cell.find("a", class_="external text")
+
+        if ticker_link:
+            ticker = ticker_link.get_text(strip=True)
+        else:
+            # Fallback in case the link structure changes
+            ticker = ticker_cell.get_text(strip=True)
+
+        if ticker and ticker != "Symbol":   # avoid any leftover header text
+            tickers.append(ticker)
+
+    return tickers
+
+def store_S_and_P_master(conn_params):
+    tickers = get_sp500_constituents_master()
+    insert_SQL = '''INSERT INTO market_data (date, s_and_p__master) VALUES (%s, %s)
+                    ON CONFLICT (date) DO UPDATE 
+                    SET s_and_p__master = EXCLUDED.s_and_p__master;'''
+
+    date = dt.datetime.today().date()
+
+    args = (date, tickers)
+
+    with psycopg2.connect(**conn_params) as conn:
+        with conn.cursor() as cur:
+            cur.execute(insert_SQL, args)
+        conn.commit()
+
+
+    SQL_Query = '''SELECT s_and_p__master FROM market_data WHERE date = %s'''
+    args = [date]
+
+    with psycopg2.connect(**conn_params) as conn:
+        with conn.cursor() as cur:
+            cur.execute(SQL_Query, args)
+            results = cur.fetchall()
+
+    for row in results[0]:
+        print(row)
+
+    return
 
 
 
@@ -841,8 +943,9 @@ if __name__ == "__main__":
     }
 
     
-    add_outstanding_shares_column(conn_params)
+    #add_outstanding_shares_column(conn_params)
 
+    store_S_and_P_master(conn_params)
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 
     #scrape_finviz_for_dividend_data(conn_params)

@@ -325,13 +325,11 @@ class thetadata_options_scrape_EOD:
 
         pass
 
-    def build_options_surfaces_withing_date_range(self, conn_params, ticker:str, start_date: dt.datetime, end_date:dt.datetime,\
+    def build_options_surfaces_within_date_range(self, conn_params, ticker:str, start_date: dt.datetime, end_date:dt.datetime,\
                                                   calculation_type):
         current_date = start_date
         while current_date <= end_date:
-            start = time.perf_counter()
             self.build_options_surface_from_database_refactored(conn_params, ticker,current_date.date(), calculation_type)
-            end = time.perf_counter()
             current_date = current_date + timedelta(days=1)
         
 
@@ -835,7 +833,15 @@ class thetadata_options_scrape_EOD:
     def one_time_script_load_options_stock_data(self,start_date:dt.datetime, end_date:dt.datetime, conn_params:dict[str,str], base_url: str = "http://127.0.0.1:25503/v3" ):
 
         return
+    
+    def build_options_surface_entire_S_and_P(self, conn_params, start_date: dt.datetime, end_date: dt.datetime, calculation_type:str):
+        tickers = S_and_P_tickers(conn_params)
 
+        for ticker in tickers:
+            print(ticker)
+            self.build_options_surfaces_within_date_range(conn_params, ticker, start_date, end_date,calculation_type)
+
+        return
     
 def main():
     conn_params = {
@@ -863,7 +869,7 @@ def main():
 
     #thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
     #thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
-    #thetadata_test.build_options_surfaces_withing_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
+    #thetadata_test.build_options_surfaces_within_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
     #end_time = time.perf_counter()
     #print("final time: ", end_time- start_time)
 
