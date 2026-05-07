@@ -14,6 +14,7 @@ from typing import Dict
 import holidays
 import requests
 from psycopg2 import sql
+from psycopg2.extras import execute_values
 import httpx
 import csv
 from bs4 import BeautifulSoup
@@ -895,7 +896,20 @@ def store_S_and_P_master(conn_params):
 
 
 def get_sp500_changes():
-   
+    """
+    Fetches the 'Selected changes to the list of S&P 500 components' table from Wikipedia
+    using BeautifulSoup and returns a dict of lists:
+    
+        {
+            datetime.date(2024, 6, 24): ["+GDDY", "-ILMN"],
+            datetime.date(2024, 5, 8): ["+VST", "-PXD"],
+            datetime.date(2026, 3, 23): ["+VRT", "+LITE", "+COHR", "+SATS", "-MTCH", "-MOH", "-LW", "-PAYC"],
+            ...
+        }
+    
+    - Key   = dt.date object
+    - Value = list[str] of signed tickers (added first, then removed)
+    """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     
     headers = {
@@ -945,30 +959,60 @@ def get_sp500_changes():
         except ValueError:
             continue
         
+        # Added ticker
         added_cell = cells[1].get_text(strip=True)
         if added_cell and added_cell.lower() not in ("nan", "—", "–", ""):
             ticker = added_cell.split(maxsplit=1)[0].strip().upper()
             if ticker:
                 changes[date_obj]["+"].append(ticker)
         
+        # Removed ticker
         removed_cell = cells[3].get_text(strip=True)
         if removed_cell and removed_cell.lower() not in ("nan", "—", "–", ""):
             ticker = removed_cell.split(maxsplit=1)[0].strip().upper()
             if ticker:
                 changes[date_obj]["-"].append(ticker)
     
+    # Build result as dict[date, list[str]]
     result = {}
     for date_obj, data in changes.items():
-        signed_tickers = [f"+{t}" for t in data["+"]] + [f"-{t}" for t in data["-"]]
-        if signed_tickers:
-            result[date_obj] = ",".join(signed_tickers)   # <-- no spaces here
+        signed_list = [f"+{t}" for t in data["+"]] + [f"-{t}" for t in data["-"]]
+        if signed_list:
+            result[date_obj] = signed_list
     
     return result
 
 
 def store_S_and_P_changes(conn_params):
+    
+    results = get_sp500_changes()
+
+    to_sql = [(dates,tick_list) for dates, tick_list in results.items()]
+
+    sql_query = '''INSERT INTO market_data (date, s_and_p_changes) VALUES  %s 
+                   ON CONFLICT (date) DO UPDATE SET
+                   s_and_p_changes = EXCLUDED.s_and_p_changes'''
+
+    with psycopg2.connect(**conn_params) as conn:
+        with conn.cursor() as cur:
+            execute_values(cur,sql_query,to_sql)
+
+    
+    sql_manual_test = ''' SELECT (date, s_and_p_changes) FROM market_data '''
+
+    with psycopg2.connect(**conn_params) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql_manual_test)
+            results = cur.fetchall()
+
+    for row in results:
+        print(row)
+
+   
 
     return
+
+
 
 
 
@@ -1025,9 +1069,7 @@ if __name__ == "__main__":
     
     #add_outstanding_shares_column(conn_params)
 
-    results = get_sp500_changes()
-    for d,b in results.items():
-        print(d,b)
+    store_S_and_P_changes(conn_params)
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 
     #scrape_finviz_for_dividend_data(conn_params)
