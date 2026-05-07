@@ -19,6 +19,7 @@ import csv
 from bs4 import BeautifulSoup
 import io
 import random
+from collections import defaultdict
 import json
 import simfin as sf
 from simfin.names import *
@@ -893,6 +894,85 @@ def store_S_and_P_master(conn_params):
 
 
 
+def get_sp500_changes():
+   
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+    }
+    
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    
+    soup = BeautifulSoup(response.text, "html.parser")
+    
+    headline = soup.find("span", id=lambda x: x and "Selected_changes_to_the_list_of_S" in x)
+    if not headline:
+        raise ValueError("Could not find the 'Selected changes' section on Wikipedia.")
+    
+    h2 = headline.find_parent("h2")
+    if not h2:
+        raise ValueError("Could not find the heading for S&P 500 changes.")
+    
+    table = h2.find_next_sibling("table", class_="wikitable")
+    if not table:
+        for t in soup.find_all("table", class_="wikitable"):
+            text = t.get_text().lower()
+            if "date" in text and "added" in text and "removed" in text:
+                table = t
+                break
+    
+    if not table:
+        raise ValueError("Could not find the S&P 500 changes table on Wikipedia.")
+    
+    changes = defaultdict(lambda: {"+": [], "-": []})
+    
+    rows = table.find_all("tr")
+    
+    for row in rows[2:]:  # skip the two header rows
+        cells = row.find_all("td")
+        if len(cells) < 4:
+            continue
+        
+        date_str = cells[0].get_text(strip=True)
+        if not date_str or date_str.lower() in ("", "date", "nan"):
+            continue
+        
+        try:
+            date_obj = dt.datetime.strptime(date_str, "%B %d, %Y").date()
+        except ValueError:
+            continue
+        
+        added_cell = cells[1].get_text(strip=True)
+        if added_cell and added_cell.lower() not in ("nan", "—", "–", ""):
+            ticker = added_cell.split(maxsplit=1)[0].strip().upper()
+            if ticker:
+                changes[date_obj]["+"].append(ticker)
+        
+        removed_cell = cells[3].get_text(strip=True)
+        if removed_cell and removed_cell.lower() not in ("nan", "—", "–", ""):
+            ticker = removed_cell.split(maxsplit=1)[0].strip().upper()
+            if ticker:
+                changes[date_obj]["-"].append(ticker)
+    
+    result = {}
+    for date_obj, data in changes.items():
+        signed_tickers = [f"+{t}" for t in data["+"]] + [f"-{t}" for t in data["-"]]
+        if signed_tickers:
+            result[date_obj] = ",".join(signed_tickers)   # <-- no spaces here
+    
+    return result
+
+
+def store_S_and_P_changes(conn_params):
+
+    return
+
+
+
+
 def load_expiration_dates_all_tickers(conn_params, base_url = "http://127.0.0.1:25503/v3"):
     tickers = S_and_P_tickers(conn_params)
     for ticker in tickers:
@@ -945,7 +1025,9 @@ if __name__ == "__main__":
     
     #add_outstanding_shares_column(conn_params)
 
-    store_S_and_P_master(conn_params)
+    results = get_sp500_changes()
+    for d,b in results.items():
+        print(d,b)
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 
     #scrape_finviz_for_dividend_data(conn_params)
