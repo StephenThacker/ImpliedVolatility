@@ -19,7 +19,7 @@ import io
 from datetime import date, timedelta
 import csv
 import holidays
-from utils import S_and_P_tickers
+from utils import get_S_and_P_composite
 import asyncio
 from collections.abc import Iterator
 import plotly
@@ -796,7 +796,7 @@ class thetadata_options_scrape_EOD:
 
     def scrape_stock_data_theta_data_S_and_P(self, start_date:dt.datetime, end_date:dt.datetime,conn_params: dict['str','str'],\
                                              base_url:str = "http://127.0.0.1:25503/v3"):
-        tickers = S_and_P_tickers(conn_params)
+        tickers = get_S_and_P_composite(conn_params, start_date, end_date)
         failed_tickers = []
         for ticker in tickers:
             #Pause to avoid API rate limit
@@ -811,7 +811,7 @@ class thetadata_options_scrape_EOD:
     
     def scrape_options_data_theta_data_S_and_P(self, start_date: dt.datetime, end_date: dt.datetime, conn_params: dict['str','str'],\
                                                base_url:str = "http://127.0.0.1:25503/v3"):
-        tickers = S_and_P_tickers(conn_params)
+        tickers = get_S_and_P_composite(conn_params, start_date, end_date)
         failed_tickers = []
         for ticker in tickers:
             #Pause to avoid API rate limit
@@ -835,11 +835,14 @@ class thetadata_options_scrape_EOD:
         return
     
     def build_options_surface_entire_S_and_P(self, conn_params, start_date: dt.datetime, end_date: dt.datetime, calculation_type:str):
-        tickers = S_and_P_tickers(conn_params)
+        tickers = get_S_and_P_composite(conn_params, start_date, end_date)
 
         for ticker in tickers:
             print(ticker)
-            self.build_options_surfaces_within_date_range(conn_params, ticker, start_date, end_date,calculation_type)
+            try:
+                self.build_options_surfaces_within_date_range(conn_params, ticker, start_date, end_date,calculation_type)
+            except Exception as e:
+                print("couldn't build surface", e)
 
         return
     

@@ -85,6 +85,46 @@ def get_S_and_P_for_date(conn_params: dict[str,str], date: dt.datetime) -> list[
 
     return modified_list
 
+# gets a list of all tickers that could possibly be in the S&P between two different date ranges
+def get_S_and_P_composite(conn_params, start_date: dt.datetime, end_date: dt.datetime):
+
+    start_date = start_date.date()
+    end_date = end_date.date()
+
+    sql_master_query = '''SELECT date, s_and_p__master FROM market_data WHERE s_and_p__master IS NOT NULL ORDER BY date DESC LIMIT 1'''
+
+    sql_changes_query = '''SELECT date, s_and_p_changes FROM market_data WHERE s_and_p_changes IS NOT NULL AND date >= %s AND date <= %s ORDER BY date DESC'''
+
+    args = [start_date, end_date]
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql_master_query)
+                results = cur.fetchall()
+            df = pd.read_sql_query(sql_changes_query, conn, params = args)
+    except Exception as e:
+        print("issue with collecting S_and_P list", e)
+    
+    master_row = results[0]
+    master_date = master_row[0]
+    S_and_P_master = master_row[1]
+
+
+    df_iteritems = df.itertuples(index=False, name = None)
+
+    flattened_tickers = [ticker[1:] for row in df_iteritems for ticker in row[1]]
+    total_tickers = S_and_P_master + flattened_tickers
+
+    total_tickers = list(set(total_tickers))
+
+    return total_tickers
+
+
+
+
+
+    return
+
 
 if __name__ == "__main__":
     conn_params = {
@@ -94,9 +134,29 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-    test_date_1 = dt.datetime.today() - timedelta(days=30)
+    test_date_1 = dt.datetime.today() - timedelta(days=365)
     test_date_2 = dt.datetime.today()
 
+    results  = get_S_and_P_composite(conn_params, test_date_1, test_date_2)
+    for row in results:
+        print(row)
+
+    print(len(results))
+
+    if 'MHK' in results:
+        print("MHK in")
+    else:
+        print("not")
+
+    if 'EMN' in results:
+        print('EMN in')
+    else: 
+        print("not")
+
+    if 'VEEV' in results:
+        print('VEEV in results')
+
+    '''
     print("checking first one")
     test_1 = get_S_and_P_for_date(conn_params,test_date_1)
     if 'CTRA' in test_1:
@@ -122,4 +182,4 @@ if __name__ == "__main__":
     if 'VEEV' in test_2:
         print("Veev passed")
     else:
-        print('VEEV failed')
+        print('VEEV failed')'''

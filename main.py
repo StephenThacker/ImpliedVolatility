@@ -34,8 +34,8 @@ if __name__ == "__main__":
     "port": "5432"
     }
 
-    end_date = dt.datetime.today() - timedelta(days=1)
-    start_date = end_date - timedelta(days= 5)
+    end_date = dt.datetime.today() - timedelta(days=70)
+    start_date = end_date - timedelta(days= 85)
 
     iterate_range(start_date, end_date,conn_params,15)
 

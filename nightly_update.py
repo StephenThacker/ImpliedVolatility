@@ -20,7 +20,7 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
 
 
     options_scrape = thetadata_options_scrape_EOD()
-    get_sp500_changes(conn_params)
+    get_sp500_changes()
     store_nightly_interest_rate(conn_params)
     print("interest rate routine finished")
     options_scrape.scrape_stock_data_theta_data_S_and_P(start_date,end_date,conn_params, base_url= base_url)
