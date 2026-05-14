@@ -10,8 +10,9 @@
 9. Calculate Market Dispersion & Correlation
 10. Track largest losers and largest gainers, in a day. 
 11. Track short interest. 
-12. Rewrite UI in dash and include other stuff. 
+12. Rewrite UI.
 13. Email report to myself every day.
 14. Improve Stock data completeness
 15. Get better dividend stock data from SimFin
 16. Port over balance sheet and income statement data for US companies from Simfin.
+17. Dividend ex-data for future distributions?

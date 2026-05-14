@@ -206,6 +206,29 @@ def initalize_options_table(conn_params):
     except Exception as e:
         print(f"DB Error: {e}")
 
+def create_future_prediction_data(conn_params):
+
+    create_table = '''CREATE TABLE IF NOT EXISTS future_predictions (
+                      date_of_creation DATE,
+                      future_date DATE,
+                      ticker VARCHAR(20),
+                      estimated_dividend DOUBLE PRECISION DEFAULT 0.0,
+                      
+                      PRIMARY KEY (date_of_creation,ticker)
+                      )'''
+    
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(create_table)
+                conn.commit()
+
+                
+    except Exception as e:
+        print(f"DB Error: {e}")
+
+    return
+
 
 
 def initialize_stock_data_table(conn_params):
@@ -482,17 +505,17 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
         print("no stock data for ticker")
         return
     
-    if type(start_date) == 'str':
-        start_date_dt = dt.datetime.strptime(start_date,"%Y-%m-%d").date() - timedelta(days=400)
+    if isinstance(start_date, str):
+        start_date_dt = dt.datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        start_date_dt = start_date.date() if isinstance(start_date, dt.datetime) else start_date
 
-    if type(end_date) == 'str':
+    start_date_dt = start_date_dt - timedelta(days=400)
+
+    if isinstance(end_date, str):
         end_date_dt = dt.datetime.strptime(end_date, "%Y-%m-%d").date()
-
-    if type(start_date) == dt.datetime or type(end_date)==dt.datetime:
-        start_date_dt = start_date_dt - timedelta(days = 400)
-        start_date_dt = start_date_dt.date()
-        end_date_dt = end_date.date()
-
+    else:
+        end_date_dt = end_date.date() if isinstance(end_date, dt.datetime) else end_date
     
 
     #pull stock data query
@@ -1065,11 +1088,12 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-
+    
+    create_future_prediction_data(conn_params)
     
     #add_outstanding_shares_column(conn_params)
 
-    store_S_and_P_changes(conn_params)
+    #store_S_and_P_changes(conn_params)
     #df1, df2 = scrape_finviz_dividend_json("BKE")
 
     #scrape_finviz_for_dividend_data(conn_params)

@@ -26,7 +26,7 @@ import plotly
 
 load_dotenv()
 
-class binomial_tree_vectorized():
+class binomial_tree_vectorized:
 
     def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend,call_or_put):
         self.number_of_layers = number_of_layers
@@ -66,6 +66,7 @@ class binomial_tree_vectorized():
             options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
 
         return options_array[0,0]
+    
    
     #builds out the tree
     #Uses 2d numpy array to create pricing array
@@ -118,6 +119,15 @@ class binomial_tree_vectorized():
             return result
         except ValueError:
             return np.nan
+        
+
+        
+    #Recombining tree method that uses interpolation method to adjust for dividend distributions, while maintaining speed
+class binomial_tree_vellekoop:
+
+    def __init__(self):
+        pass
+
 
     
 class calculate_dates:
@@ -338,6 +348,11 @@ class thetadata_options_scrape_EOD:
             return self.black_scholes.call_or_put_method[arg_string]
         
         options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
+
+        if calculation_type == 'Vellekoop':
+            pass
+
+
         if calculation_type == "Black Scholes":
             options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
                                             (1e-5, options_dataframe['stock_price'],\

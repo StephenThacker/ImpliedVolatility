@@ -97,12 +97,12 @@ class Testinitialize_database(unittest.TestCase):
                         print(e) 
 
 
-                    t_div_yield = float(get_dividend_yield(ticker))/100
+                    test_div_yield = float(get_dividend_yield(ticker))/100
                     #Check stock values
                     with self.subTest(check = 'close_price'):
                         self.assertAlmostEqual(stock_close,stock_close_datab,delta=0.1)
                     with self.subTest(check = "dividend yield"):
-                        self.assertTrue(math.isclose(t_div_yield,div_yield,rel_tol=0.25))
+                        self.assertTrue(math.isclose(test_div_yield,div_yield,rel_tol=0.25))
                 except Exception as e:
                     self.fail(f"Unexpected crash for {ticker}: {e}")
 

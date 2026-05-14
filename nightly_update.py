@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import datetime as dt
 import os
-from initialize_database import store_nightly_interest_rate, iterate_through_S_and_P_store_dividend_yields, get_sp500_changes
+from initialize_database import store_nightly_interest_rate, iterate_through_S_and_P_store_dividend_yields, store_S_and_P_changes
 from implied_vol import thetadata_options_scrape_EOD
 import datetime as dt
 from datetime import timedelta
@@ -20,7 +20,7 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
 
 
     options_scrape = thetadata_options_scrape_EOD()
-    get_sp500_changes()
+    store_S_and_P_changes(conn_params)
     store_nightly_interest_rate(conn_params)
     print("interest rate routine finished")
     options_scrape.scrape_stock_data_theta_data_S_and_P(start_date,end_date,conn_params, base_url= base_url)

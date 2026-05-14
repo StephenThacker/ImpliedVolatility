@@ -20,7 +20,8 @@ from collections import defaultdict
 import io
 import random
 import json
-from utils import S_and_P_tickers
+from utils import get_S_and_P_composite
+from initialize_database import iterate_through_S_and_P_store_dividend_yields
 
 load_dotenv()
 
@@ -28,34 +29,38 @@ def scrape_short_interest_data():
     return
 
 
-def scrape_dividend_data(ticker: str, start_date: dt.datetime = None, end_date: dt.datetime = None)->Dict:
-
-    if not start_date:
+def scrape_dividend_data(ticker: str, 
+                        start_date: dt.datetime = None, 
+                        end_date: dt.datetime = None) -> Dict:
+    
+    if start_date is None:
         start_date = dt.datetime.today()
-    if not end_date:
+    if end_date is None:
         end_date = dt.datetime.today()
 
-    start_date = dt.datetime.strftime(start_date, '%Y-%m-%d')
-    end_date = dt.datetime.strftime(end_date, '%Y-%m-%d')
-
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
 
     url = "https://api.massive.com/stocks/v1/dividends"
     
     params = {
         "ticker": ticker,
+        "distribution_type": "recurring",     
         "limit": 100,
-        "sort": "ticker.asc",
-        "ex_dividend_date.gte": start_date,
-        "ex_dividend_date.lte": end_date,
-        "apiKey": os.getenv('POLYGONIO_KEY')}
+        "sort": "ticker.asc",                  
+        "ex_dividend_date.gte": start_date_str,
+        "ex_dividend_date.lte": end_date_str,
+        "apiKey": os.getenv('POLYGONIO_KEY')
+    }
     
-    response = httpx.get(url,params = params, verify=False)
+    response = httpx.get(url, params=params, verify=False)
 
     if response.status_code == 200:
         return response.json()
     else:
         print("Pull failed")
-        print(response.status_code,": ", response.text)
+        print(response.status_code, ": ", response.text)
+        return {}   
 
 
 def store_divs_in_database_polyio(cur,ticker, results: Dict):
@@ -88,16 +93,41 @@ def store_divs_in_database_polyio(cur,ticker, results: Dict):
 
     #manaul_test_query = '''SELECT date,ticker, dividend FROM stock_data WHERE ticker = %s AND dividend > 0 ORDER by date DESC LIMIT 10'''
 
+def store_special_divs_in_database_polyio(cur,ticker, results: Dict):
 
+    results = results['results']
+
+    dividend_dict = defaultdict(float)
+
+    for row in results:
+        key = (row['ex_dividend_date'], row['ticker'])
+        amount = float(row['cash_amount'])
+        dividend_dict[key] += amount
+
+    dividend_list = [(date_val,tkr,amount) for (date_val,tkr), amount in dividend_dict.items()]
+
+        
+    sql_insert = '''INSERT INTO stock_data (date, ticker, special_dividend ) VALUES %s
+                    ON CONFLICT (date,ticker) DO UPDATE SET
+                    dividend = EXCLUDED.dividend'''
+    
+
+    if dividend_list:
+        try:
+            psycopg2.extras.execute_values(cur, sql_insert, dividend_list, page_size=2000)
+        except Exception as e:
+            print("Error storing dividends:", e)
+    else:
+        print(ticker, " No dividends found")
 
 
 def pull_div_data_poly_for_all(conn_params, start_date: dt.datetime = None, end_date:dt.datetime = None):
 
-    tickers = S_and_P_tickers(conn_params)
     if not start_date:
         start_date = dt.datetime.today()
     if not end_date:
         end_date = dt.datetime.today()
+    tickers = get_S_and_P_composite(conn_params, start_date, end_date)
 
     successful_tickers  = []
     try:
@@ -145,5 +175,7 @@ if __name__ == "__main__":
     "port": "5432"
     }
     start_date = dt.datetime.today() - timedelta(days=5000)
-    end_date = dt.datetime.today() - timedelta(days = 1)
-    pull_div_data_poly_for_all(conn_params, start_date, end_date)
+    end_date = dt.datetime.today() + timedelta(days = 100)
+
+    #tickers = pull_div_data_poly_for_all(conn_params, start_date, end_date)
+    iterate_through_S_and_P_store_dividend_yields(start_date, dt.datetime.today(), conn_params)
