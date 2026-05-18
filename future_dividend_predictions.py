@@ -8,7 +8,9 @@ from utils import get_S_and_P_composite
 
 
 def iterate_composite_tickers_dividend_prediction(conn_params, ticker: str):
-    tickers = get_S_and_P_composite(conn_params, ticker)
+    start_date = dt.datetime.today() - timedelta(days=2000)
+    end_date = dt.datetime.today()
+    tickers = get_S_and_P_composite(conn_params,start_date, end_date)
 
     for ticker in tickers:
         generate_future_dividend_predictions(conn_params, ticker)
@@ -45,10 +47,10 @@ def generate_future_dividend_predictions(conn_params, ticker: str):
     date, last_div = div_pull
 
     insert_query = '''INSERT INTO future_predictions (date_of_creation, future_date, ticker, estimated_dividend)
-                      VALUES (%s, %s, %s, %s) ON CONFLICT (date_of_creation, ticker)
+                      VALUES (%s, %s, %s, %s) ON CONFLICT (date_of_creation,future_date, ticker)
                       DO UPDATE SET
-                      estimated_dividend = EXCLUDED.estimated_dividend,
-                      future_date = EXCLUDED.future_date'''
+                      estimated_dividend = EXCLUDED.estimated_dividend
+                      '''
 
     today = dt.datetime.today()
     #Can upgrade this method to have better dividend predictions
@@ -89,5 +91,5 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-    generate_future_dividend_predictions(conn_params, 'AAPL')
+    iterate_composite_tickers_dividend_prediction(conn_params, 'AAPL')
 

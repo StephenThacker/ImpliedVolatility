@@ -214,7 +214,7 @@ def create_future_prediction_data(conn_params):
                       ticker VARCHAR(20),
                       estimated_dividend DOUBLE PRECISION DEFAULT 0.0,
                       
-                      PRIMARY KEY (date_of_creation,ticker)
+                      PRIMARY KEY (date_of_creation, future_date, ticker)
                       )'''
     
     try:
