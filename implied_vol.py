@@ -28,7 +28,7 @@ load_dotenv()
 
 class binomial_tree_vectorized:
 
-    def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend,call_or_put):
+    def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put):
         self.number_of_layers = number_of_layers
         self.initial_stock_price = initial_stock_price
         self.time_to_expiration = time_to_expiration
@@ -125,24 +125,63 @@ class binomial_tree_vectorized:
     # "Extracting Information on Implied Volatilities and Discrete Dividends from American Option Prices" by Martina Nardon, Paolo Pianca
 class binomial_tree_vellekoop(binomial_tree_vectorized):
 
-    def __init__(self, *args, **kwargs):          # you can also list specific parameters
-        super().__init__(*args, **kwargs)
+    def __init__(self, number_of_layers, initial_stock_price, interest_rate,
+                 time_to_expiration, stock_dividend, call_or_put,
+                 target_date=None):
+        super().__init__(number_of_layers,initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put)
+        self.targ_date = target_date
+        self.days_to_expir = int(time_to_expiration)
 
+    
+    def collect_dividends_per_tree(self)->list[tuple[dt.datetime,float]]:
+        end_date = self.targ_date + timedelta(days=self.days_to_expir)
+        dividend_df = self.dividend.loc[(self.dividend['date']>= self.targ_date)&(self.dividend['date']<= end_date)]
+        if dividend_df.empty == True:
+            return []
+        else:
+            iterable_df = dividend_df.itertuples(index = False, name = None)
+            date_div_pairs = []
+            for row in iterable_df:
+                date_div_pairs.append(row)
+            return date_div_pairs
+        
+    
+    def map_dividend_dates_to_integer_timestep(self,dividends_tup_list):
+        return
+    
     
     @staticmethod
     @njit(fastmath = True)
-    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor):
-        return 
+    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor,dividend_tups):
+        if not dividend_tups:
+            #HAve to de-modularize code here, because using NJIT and does not support Python OOP
+            price_array = np.zeros((number_of_layers,number_of_layers))
+            price_array[0,0] = initial_stock_price
+            for i in range(1,number_of_layers):
+                price_array[i,0] = price_array[i-1,0]*down_factor
+                price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
+            return price_array
+        else:
+            pass
     
     @staticmethod
     @njit(fastmath = True)
-    def backwards_pass_njit(price_array, number_of_layers, discount_up, discount_down, strike, call_or_put):
-        return 
+    def backwards_pass_njit(price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
+        if not dividend_tups:
+            options_array  = np.zeros((number_of_layers,number_of_layers))
+            if call_or_put == True:
+                options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
+            if call_or_put == False:
+                options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
+            for i in range(number_of_layers -2, -1,-1):
+                continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+                intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
+                options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
+
+            return options_array[0,0]
+        else:
+            pass
     
-
-    
-
-
     
 class calculate_dates:
 
@@ -342,13 +381,10 @@ class thetadata_options_scrape_EOD:
         expirations_list = self.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
         if calculation_type == 'Vellekoop':
-            if not dividend_list:
+            if not isinstance(dividend_list, pd.DataFrame) or dividend_list.empty:
                 dividend_start_date = target_date
                 dividend_end_date = expirations_list[-1]
                 dividends_df = self.build_dividends_dataframe(conn_params, ticker, dividend_start_date, dividend_end_date)
-                print("printing dividend ticker")
-                print(dividends_df.head())
-                print(dividends_df.tail())
             else:
                 dividends_df = dividend_list            
 
@@ -358,7 +394,7 @@ class thetadata_options_scrape_EOD:
             if not isinstance(dividend_list, pd.DataFrame) or dividend_list.empty:
                 options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe)
             else:
-                options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe, dividends_df)
+                options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe, dividends_df, target_date = target_date)
 
             options_dataframe = self.filter_iv_data(options_dataframe, -5, 15)
             self.store_iv_data(conn_params,options_dataframe, calculation_type)
@@ -433,7 +469,8 @@ class thetadata_options_scrape_EOD:
             print(f"Error pulling future dividends: {e}")
             return pd.DataFrame()
 
-    def calculate_iv_surface_refactored(self, calculation_type:str, options_dataframe:pd.DataFrame,dividends_df=None, number_of_layers = 100, dividend_df = None) -> pd.DataFrame:
+    def calculate_iv_surface_refactored(self, calculation_type:str, options_dataframe:pd.DataFrame,dividends_df=None, number_of_layers = 100,\
+                                        target_date: dt.datetime = None) -> pd.DataFrame:
         def call_or_put(arg_string):
             
             return self.black_scholes.call_or_put_method[arg_string]
@@ -445,9 +482,11 @@ class thetadata_options_scrape_EOD:
             interest_rate = options_dataframe['risk_free'].iloc[-1]
             dividends = dividends_df
             days_to_expiration = options_dataframe['days_to_expir'].iloc[-1]
-            call_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, days_to_expiration, dividends, 'CALL')
-            put_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, days_to_expiration,dividends,"PUT")
-            
+            call_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, 100, dividends, 'CALL', target_date=target_date)
+            print("1")
+            call_tree.collect_dividends_per_tree()
+            put_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, days_to_expiration,dividends,"PUT",target_date=target_date)
+
             cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
             options_dataframe.loc[is_call, 'implied_vol'] = cal_vec_func(0.01, 5, options_dataframe.loc[is_call, 'strike'].values, options_dataframe.loc[is_call, 'midpoint'].values)     
             put_vec_func = np.vectorize(put_tree.vectorized_brentq_wrapper, otypes=[float])
