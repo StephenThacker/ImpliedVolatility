@@ -275,8 +275,8 @@ def initialize_general_market_data_table(conn_params):
        date DATE,
        risk_free_rate DOUBLE PRECISION,
        S_and_P_tickers TEXT[],
-       S_and_P__master TEXT[] DEFAULT NONE,
-       S_and_P_changes TEXT[] DEFAULT NONE,
+       S_and_P__master TEXT[] ,
+       S_and_P_changes TEXT[] ,
        
        PRIMARY KEY (date)
        )
