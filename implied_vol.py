@@ -26,14 +26,15 @@ import plotly
 
 load_dotenv()
 
-class binomial_tree_vectorized:
+class binomial_tree_vectorized():
 
-    def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put):
+    def __init__(self, number_of_layers, initial_stock_price, interest_rate, time_to_expiration, stock_dividend,call_or_put):
         self.number_of_layers = number_of_layers
         self.initial_stock_price = initial_stock_price
         self.time_to_expiration = time_to_expiration
         self.interest_rate = interest_rate
         self.dividend = stock_dividend
+        self.node_list = []
         self.call_or_put = call_or_put
         self.time_to_expiration = self.time_to_expiration/365
         try:
@@ -65,7 +66,6 @@ class binomial_tree_vectorized:
             options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
 
         return options_array[0,0]
-    
    
     #builds out the tree
     #Uses 2d numpy array to create pricing array
@@ -118,70 +118,7 @@ class binomial_tree_vectorized:
             return result
         except ValueError:
             return np.nan
-        
 
-        
-    # Recombining tree method that uses interpolation method to adjust for dividend distributions, while maintaining speed
-    # "Extracting Information on Implied Volatilities and Discrete Dividends from American Option Prices" by Martina Nardon, Paolo Pianca
-class binomial_tree_vellekoop(binomial_tree_vectorized):
-
-    def __init__(self, number_of_layers, initial_stock_price, interest_rate,
-                 time_to_expiration, stock_dividend, call_or_put,
-                 target_date=None):
-        super().__init__(number_of_layers,initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put)
-        self.targ_date = target_date
-        self.days_to_expir = int(time_to_expiration)
-
-    
-    def collect_dividends_per_tree(self)->list[tuple[dt.datetime,float]]:
-        end_date = self.targ_date + timedelta(days=self.days_to_expir)
-        dividend_df = self.dividend.loc[(self.dividend['date']>= self.targ_date)&(self.dividend['date']<= end_date)]
-        if dividend_df.empty == True:
-            return []
-        else:
-            iterable_df = dividend_df.itertuples(index = False, name = None)
-            date_div_pairs = []
-            for row in iterable_df:
-                date_div_pairs.append(row)
-            return date_div_pairs
-        
-    
-    def map_dividend_dates_to_integer_timestep(self,dividends_tup_list):
-        return
-    
-    
-    @staticmethod
-    @njit(fastmath = True)
-    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor,dividend_tups):
-        if not dividend_tups:
-            #HAve to de-modularize code here, because using NJIT and does not support Python OOP
-            price_array = np.zeros((number_of_layers,number_of_layers))
-            price_array[0,0] = initial_stock_price
-            for i in range(1,number_of_layers):
-                price_array[i,0] = price_array[i-1,0]*down_factor
-                price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
-            return price_array
-        else:
-            pass
-    
-    @staticmethod
-    @njit(fastmath = True)
-    def backwards_pass_njit(price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
-        if not dividend_tups:
-            options_array  = np.zeros((number_of_layers,number_of_layers))
-            if call_or_put == True:
-                options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
-            if call_or_put == False:
-                options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
-            for i in range(number_of_layers -2, -1,-1):
-                continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
-                intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
-                options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
-
-            return options_array[0,0]
-        else:
-            pass
-    
     
 class calculate_dates:
 
@@ -281,7 +218,7 @@ class thetadata_options_scrape_EOD:
     #selects expirations that currently exist in the database, for a specific target
     def select_available_expiration_dates_for_ticker(self, conn_params, ticker : str, target_date : dt.datetime.date)\
           -> list[dt.datetime.date]:
-        sql_query = '''SELECT DISTINCT expiration FROM options WHERE ticker = %s AND price_date = %s ORDER BY expiration ASC'''
+        sql_query = '''SELECT DISTINCT expiration FROM options WHERE ticker = %s AND price_date = %s'''
         args = [ticker, target_date]
 
         try:
@@ -376,26 +313,13 @@ class thetadata_options_scrape_EOD:
 
         return df
     
-    def build_options_surface_from_database_refactored(self, conn_params, ticker:str, target_date:dt.datetime.date, calculation_type:str, dividend_list = None):
+    def build_options_surface_from_database_refactored(self, conn_params, ticker:str, target_date:dt.datetime.date, calculation_type:str):
         #selects expirations that currently exist in the database, for a specific target
         expirations_list = self.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
-        if calculation_type == 'Vellekoop':
-            if not isinstance(dividend_list, pd.DataFrame) or dividend_list.empty:
-                dividend_start_date = target_date
-                dividend_end_date = expirations_list[-1]
-                dividends_df = self.build_dividends_dataframe(conn_params, ticker, dividend_start_date, dividend_end_date)
-            else:
-                dividends_df = dividend_list            
-
         for expiration_date in expirations_list:
             options_dataframe = self.pulling_all_options_data_for_pricing(conn_params, ticker, target_date, expiration_date)
-            
-            if not isinstance(dividend_list, pd.DataFrame) or dividend_list.empty:
-                options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe)
-            else:
-                options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe, dividends_df, target_date = target_date)
-
+            options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe)
             options_dataframe = self.filter_iv_data(options_dataframe, -5, 15)
             self.store_iv_data(conn_params,options_dataframe, calculation_type)
 
@@ -403,98 +327,17 @@ class thetadata_options_scrape_EOD:
 
     def build_options_surfaces_within_date_range(self, conn_params, ticker:str, start_date: dt.datetime, end_date:dt.datetime,\
                                                   calculation_type):
-        
-        if calculation_type == 'Vellekoop':
-            dividend_start_date = start_date
-            dividend_end_date = end_date + timedelta(days=1000)
-            dividends_df = self.build_dividends_dataframe(conn_params, ticker, dividend_start_date, dividend_end_date)
-        else:
-            dividends_df = None
-
-
-
         current_date = start_date
         while current_date <= end_date:
-            if not isinstance(dividends_df, pd.DataFrame) or dividends_df.empty:
-                self.build_options_surface_from_database_refactored(conn_params, ticker,current_date.date(), calculation_type)
-            else:
-                self.build_options_surface_from_database_refactored(conn_params, ticker,current_date.date(), calculation_type, dividend_list = dividends_df)
+            self.build_options_surface_from_database_refactored(conn_params, ticker,current_date.date(), calculation_type)
             current_date = current_date + timedelta(days=1)
+        
 
-    def build_dividends_dataframe(self,conn_params,ticker:str, start_date:dt.datetime, end_date:dt.datetime):
-        historical_df = self.pull_dividend_db(conn_params, ticker, start_date, end_date)
-        future_df = self.pull_future_dividends_estimation(conn_params, ticker, start_date, end_date)
-
-        dfs = []
-        if historical_df is not None and not historical_df.empty:
-            dfs.append(historical_df)
-        if future_df is not None and not future_df.empty:
-            dfs.append(future_df)
-            
-        if dfs:
-            combined_df = pd.concat(dfs, ignore_index=True)
-            combined_df.sort_values('date', inplace=True)
-            combined_df.reset_index(drop=True, inplace=True)
-            return combined_df
-        
-        return pd.DataFrame(columns=['date', 'dividend'])
-    
-    def pull_dividend_db(self, conn_params,ticker:str, start_date:dt.datetime, end_date:dt.datetime):
-        sql_query = '''SELECT date, dividend FROM stock_data 
-                       WHERE ticker = %s AND date >= %s AND date <= %s AND dividend > 0
-                       ORDER BY date ASC'''
-        
-        args = [ticker, start_date, end_date]
-        
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                df = pd.read_sql_query(sql_query, conn, params=args)
-                return df
-        except Exception as e:
-            print(f"Error pulling historical dividends: {e}")
-            return pd.DataFrame()
-
-    def pull_future_dividends_estimation(self, conn_params,ticker:str, start_date:dt.datetime, end_date:dt.datetime):
-        sql_query = '''SELECT future_date as date, estimated_dividend as dividend FROM future_predictions 
-                       WHERE ticker = %s AND future_date >= %s AND future_date <= %s AND estimated_dividend > 0
-                       ORDER BY future_date ASC'''
-        
-        args = [ticker, start_date, end_date]
-        
-        try:
-            with psycopg2.connect(**conn_params) as conn:
-                df = pd.read_sql_query(sql_query, conn, params=args)
-                return df
-        except Exception as e:
-            print(f"Error pulling future dividends: {e}")
-            return pd.DataFrame()
-
-    def calculate_iv_surface_refactored(self, calculation_type:str, options_dataframe:pd.DataFrame,dividends_df=None, number_of_layers = 100,\
-                                        target_date: dt.datetime = None) -> pd.DataFrame:
+    def calculate_iv_surface_refactored(self, calculation_type:str, options_dataframe:pd.DataFrame, number_of_layers = 100) -> pd.DataFrame:
         def call_or_put(arg_string):
-            
             return self.black_scholes.call_or_put_method[arg_string]
         
         options_dataframe['call_or_put_func'] = options_dataframe['option_type'].map(call_or_put)
-
-        if calculation_type == 'Vellekoop':
-            stock_price = options_dataframe['stock_price'].iloc[-1]
-            interest_rate = options_dataframe['risk_free'].iloc[-1]
-            dividends = dividends_df
-            days_to_expiration = options_dataframe['days_to_expir'].iloc[-1]
-            call_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, 100, dividends, 'CALL', target_date=target_date)
-            print("1")
-            call_tree.collect_dividends_per_tree()
-            put_tree = binomial_tree_vellekoop(number_of_layers, stock_price, interest_rate, days_to_expiration,dividends,"PUT",target_date=target_date)
-
-            cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-            options_dataframe.loc[is_call, 'implied_vol'] = cal_vec_func(0.01, 5, options_dataframe.loc[is_call, 'strike'].values, options_dataframe.loc[is_call, 'midpoint'].values)     
-            put_vec_func = np.vectorize(put_tree.vectorized_brentq_wrapper, otypes=[float])
-            options_dataframe.loc[is_put, 'implied_vol'] = put_vec_func(0.01, 5, options_dataframe.loc[is_put, 'strike'].values, options_dataframe.loc[is_put, 'midpoint'].values)
-            del call_tree
-            del put_tree
-
-
         if calculation_type == "Black Scholes":
             options_dataframe['implied_vol'] = np.vectorize(self.black_scholes.newton_raphson_method_black_scholes)\
                                             (1e-5, options_dataframe['stock_price'],\
@@ -567,7 +410,13 @@ class thetadata_options_scrape_EOD:
         del options_dataframe
         return
 
+    
+    def pull_data_and_calc_iv(self, ticker, target_date, expiration_date, conn_params, calculation_type ):
+        options_data = self.pull_options_data_from_database_per_expiration( ticker, target_date, expiration_date, conn_params)
+        
+        self.iv_calculation(options_data, conn_params, calculation_type)
 
+        return
     
     def _format_options_ticker_for_API(self,ticker:str) -> str:
         #Removes decimals from strings, because ThetaData API does not have any tickers with decimals for options contracts
@@ -1010,14 +859,22 @@ def main():
     thetadata_test = thetadata_options_scrape_EOD()
 
     
-    today = dt.datetime.today()
-    end_date = dt.datetime.today() - timedelta(days=3)
-    start_date = dt.datetime.today() - timedelta(days = 300)
+    today = dt.datetime.today() - timedelta(days=1)
+    one_mo_ago = today - timedelta(days=5)
+    medium_date = one_mo_ago + timedelta(days= 15)
+    
+    end_date = dt.datetime.today() - timedelta(days=1)
+    start_date = dt.datetime.today() - timedelta(days = 360)
+    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
+    end_date = start_date
+    start_date = end_date - timedelta(days=360)
+    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
 
-    target_date_manual_test = dt.datetime.today() + timedelta(days=180)
-
-    thetadata_test.build_options_surfaces_within_date_range(conn_params,'CVX',start_date,end_date, calculation_type= 'Vellekoop')
-
+    #thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    #thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    #thetadata_test.build_options_surfaces_within_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
+    #end_time = time.perf_counter()
+    #print("final time: ", end_time- start_time)
 
 if __name__ == "__main__":
     main()
