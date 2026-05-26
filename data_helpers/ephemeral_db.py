@@ -180,25 +180,23 @@ def copy_data_from_real_db(conn_params_test: dict[str, str], conn_params_real_ur
 
     return
 
-@pytest.fixture(scope='session')
-def postgres_container():
-    with PostgresContainer('postgres:18-alpine') as postgres:
-        conn_params = {
-            'host': postgres.get_container_host_ip(),
-            'port': postgres.get_exposed_port(5432),
-            'user': postgres.username,
-            'password': postgres.password,
-            'dbname': postgres.dbname,
-        }
 
-        create_schema(conn_params)
+def start_test_db():
+    postgres = PostgresContainer('postgres:18-alpine')
+    postgres.start()                  
 
-        copy_data_from_real_db(conn_params, REAL_DATABASE_URL)
+    conn_params = {
+        'host': postgres.get_container_host_ip(),
+        'port': postgres.get_exposed_port(5432),
+        'user': postgres.username,
+        'password': postgres.password,
+        'dbname': postgres.dbname,
+    }
 
+    create_schema(conn_params)
+    copy_data_from_real_db(conn_params, REAL_DATABASE_URL)
 
-        yield conn_params
-
-
+    return conn_params, postgres
 
 
 if __name__ == "__main__":
@@ -216,8 +214,3 @@ if __name__ == "__main__":
         create_schema(conn_params)
         copy_data_from_real_db(conn_params, REAL_DATABASE_URL)
         print("Finished test")
-
-
-
-
-
