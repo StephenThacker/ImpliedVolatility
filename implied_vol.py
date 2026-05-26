@@ -34,7 +34,6 @@ class binomial_tree_vectorized():
         self.time_to_expiration = time_to_expiration
         self.interest_rate = interest_rate
         self.dividend = stock_dividend
-        self.node_list = []
         self.call_or_put = call_or_put
         self.time_to_expiration = self.time_to_expiration/365
         try:
