@@ -10,6 +10,9 @@ from polygonio_scrape import pull_div_data_poly_for_all
 load_dotenv()
 
 def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = None, base_url = "http://host.docker.internal:25503/v3"):
+
+    print("nightly update")
+    '''
     if conn_params == None:
         conn_params = {
         "host": "db",
@@ -41,7 +44,7 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
     options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
     print("completed Black Scholes")
     options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Binomial Tree')
-    print("completed Binomial Tree")
+    print("completed Binomial Tree") '''
 
 
 if __name__ == "__main__":

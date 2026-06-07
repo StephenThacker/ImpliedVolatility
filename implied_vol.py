@@ -858,19 +858,11 @@ def main():
     thetadata_test = thetadata_options_scrape_EOD()
 
     
-    today = dt.datetime.today() - timedelta(days=1)
-    one_mo_ago = today - timedelta(days=5)
-    medium_date = one_mo_ago + timedelta(days= 15)
-    
-    end_date = dt.datetime.today() - timedelta(days=1)
-    start_date = dt.datetime.today() - timedelta(days = 360)
-    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
-    end_date = start_date
-    start_date = end_date - timedelta(days=360)
+    end_date = dt.datetime(2026, 5, 18)
+    start_date = dt.datetime(2026, 5, 18)
     thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
 
-    #thetadata_test.stream_stock_data_into_db('FIG', start_date, end_date, conn_params=conn_params)
-    #thetadata_test.stream_options_into_db('FIG', start_date, end_date, conn_params=conn_params)
+    thetadata_test.scrape_stock_data_theta_data_S_and_P(start_date,end_date,conn_params)
     #thetadata_test.build_options_surfaces_within_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
     #end_time = time.perf_counter()
     #print("final time: ", end_time- start_time)

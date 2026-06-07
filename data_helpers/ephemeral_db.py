@@ -22,8 +22,8 @@ if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
 
 REAL_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-START_DATE = date(2026, 5, 11)
-END_DATE   = date(2026, 5, 13)
+START_DATE = date(2026, 5, 18)
+END_DATE   = date(2026, 5, 18)
 
 def create_schema(conn_params: dict[str,str]):
     with psycopg2.connect(**conn_params) as conn:
@@ -130,9 +130,9 @@ def copy_data_from_real_db(conn_params_test: dict[str, str], conn_params_real_ur
                     print("starting options block")
                     #options_block
                     options_query = ''' SELECT ticker, expiration, strike, option_type, price_date, close, midpoint, bs_implied_vol, bin_imp_vol
-                                        FROM options WHERE price_date >= %s AND price_date <= %s '''
+                                        FROM options WHERE price_date >= %s AND price_date <= %s AND ticker = %s'''
                     
-                    options_args = (START_DATE, END_DATE)
+                    options_args = (START_DATE, END_DATE, 'XOM')
                     
                     real_curs.execute(options_query,options_args)
                     options_results = real_curs.fetchall()
@@ -149,12 +149,12 @@ def copy_data_from_real_db(conn_params_test: dict[str, str], conn_params_real_ur
 
                     #stock_block
                     print("starting stock results block")
-                    stock_query = '''SELECT ticker, date, dividend, close FROM stock_data WHERE date >= %s AND date <= %s'''
-                    stock_args = (START_DATE, END_DATE)
+                    stock_query = '''SELECT ticker, date, dividend,div_yield_per, close FROM stock_data WHERE date >= %s AND date <= %s AND ticker = %s'''
+                    stock_args = (START_DATE, END_DATE, 'XOM')
                     real_curs.execute(stock_query, stock_args)
                     stock_results = real_curs.fetchall()
                     print("pulled " , len(stock_results), "from stock_results")
-                    stock_insert_query = '''INSERT INTO stock_data (ticker ,date, dividend, close) VALUES %s ON CONFLICT (ticker,date) DO NOTHING'''
+                    stock_insert_query = '''INSERT INTO stock_data (ticker ,date, dividend, div_yield_per, close) VALUES %s ON CONFLICT (ticker,date) DO NOTHING'''
 
                     if stock_results:
                         execute_values(test_curs, stock_insert_query, stock_results, page_size = 1000)
