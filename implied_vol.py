@@ -64,6 +64,7 @@ class binomial_tree_vectorized():
             intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
             options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
 
+
         return options_array[0,0]
    
     #builds out the tree

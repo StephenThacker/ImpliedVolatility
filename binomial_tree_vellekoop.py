@@ -37,14 +37,18 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
 
     def __init__(self, number_of_layers, initial_stock_price, interest_rate,
                  time_to_expiration, stock_dividend, call_or_put,
-                 target_date=None, conn_params = None, ticker = None, last_date = None):
+                 target_date=None, conn_params = None, ticker = None, last_date = None, expiration_date = None):
         
         super().__init__(number_of_layers,initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put)
+        date_object = calculate_dates()
         self.targ_date = target_date
         self.days_to_expir = int(time_to_expiration)
         self.dividend_df = self.build_dividends_dataframe(conn_params, ticker, target_date, last_date)
-        dividend_tups_list = self.refine_dividends_list(target_date, last_date)
-        print(dividend_tups_list)
+        self.last_date = last_date
+        self.dividend_tups_list = self.refine_dividends_list(target_date, expiration_date)
+        print("div tups list")
+        print(self.dividend_tups_list)
+
 
 
 
@@ -72,8 +76,25 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
             return []
         
         filtered_divs = self.dividend_df.loc[(self.dividend_df['date'] >= start_date) & (self.dividend_df['date']<= end_date)]
-        filtered_tups = filtered_divs.itertuples(index = False, name = None)
+        indices = filtered_divs['date'].map(self.convert_days_to_index).values
+        divs = filtered_divs['dividend'].values
+        filtered_tups = zip(indices, divs)
+
         return list(filtered_tups)
+    
+    def convert_days_to_index(self, dividend_ex_date):
+
+        diff = (dividend_ex_date - self.targ_date).days
+
+        total = (self.last_date - self.targ_date).days
+
+
+        if total == 0:
+            return 0
+
+        index = int(round((diff/total)*(self.number_of_layers-1)))
+
+        return index
     
 
     
@@ -109,18 +130,35 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
             return pd.DataFrame()
 
 
-        
-    
-    def map_dividend_dates_to_integer_timestep(self,dividends_tup_list):
-        return
+
+
+
     
 
-    def forward_pass_python(self, number_of_layers, initial_stock_price, down_factor, up_factor):
-        return super.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
+    def forward_pass_njit(self, number_of_layers, initial_stock_price, down_factor, up_factor):
+        return super().forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
         
     
-    def backwards_pass_python(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put):
-        return
+    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
+        if not self.dividend_tups_list:
+            return super().backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike,call_or_put)
+        
+        first_elements = [tup[0] for tup in dividend_tups]
+        
+        options_array  = np.zeros((number_of_layers,number_of_layers))
+        if call_or_put == True:
+            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
+        if call_or_put == False:
+            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
+
+        for i in range(number_of_layers -2, -1,-1):
+            if np.int64(i) in first_elements:
+                continuation = 
+                continue
+            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
+            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
+        
     
     '''
     @staticmethod
@@ -207,12 +245,19 @@ if __name__ == "__main__":
 
         data_sample_1 = theta_data_object.pulling_all_options_data_for_pricing(conn_params, 'XOM', target_date, trial_date_no_div)
 
+        is_call = data_sample_1['option_type'] == 'CALL'
+        is_put = data_sample_1['option_type'] == 'PUT'
+
         stock_price = data_sample_1['stock_price'].iloc[-1]
         interest_rate = data_sample_1['risk_free'].iloc[-1]
         stock_dividend_yield = 0 #Not relevant for this version
         days_to_expiration = data_sample_1['days_to_expir'].iloc[-1]
         call_tree = binomial_tree_vellekoop(100, stock_price,interest_rate,days_to_expiration, stock_dividend_yield, 'CALL', trial_date_no_div,\
-                                            conn_params, 'XOM', last_date)
+                                            conn_params, 'XOM', last_date, trial_date_no_div)
+        cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+        IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
+        #print("IV call vals")
+        #print(IV_call_vals)
 
 
 
@@ -225,7 +270,7 @@ if __name__ == "__main__":
         days_to_expiration_div = data_sample_2['days_to_expir'].iloc[-1]
 
         call_tree_divs = binomial_tree_vellekoop(100, stock_price_div, interest_rate_div, days_to_expiration_div,stock_dividend_yield,\
-                                                 'CALL',target_date,conn_params, 'XOM', last_date)
+                                                 'CALL',target_date,conn_params, 'XOM', last_date, trial_date_divs)
 
         
 
