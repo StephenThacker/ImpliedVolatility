@@ -136,7 +136,56 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
     
 
     def forward_pass_njit(self, number_of_layers, initial_stock_price, down_factor, up_factor):
-        return super().forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
+        if not self.dividend_tups_list:
+            return super().forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
+        else:
+            price_tree = super().forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor)
+            price_tree_initial = price_tree.copy()
+            print("initial price tree")
+            dividend_tups = self.dividend_tups_list[::-1]
+            index, div = dividend_tups[0]
+            div_sub = div
+            j = 0
+            for i in range(0,len(price_tree)-1):
+                print(i, index)
+                if i >= index :
+                    price_tree[i,:] = np.maximum(0,price_tree[i,:] - div_sub)
+                    if j +1< len(dividend_tups):
+                        j = j + 1
+                        index,div = dividend_tups[j]
+                        div_sub = div_sub + div
+
+            subtract = np.subtract(price_tree,price_tree_initial)
+            for i in range(0,len(subtract)):
+                print(i)
+                print(subtract[i])
+            return price_tree
+        
+        
+
+    def pricing_forward_pass(self,sigma, strike):
+        call_or_put = self.call_or_put.lower()
+        up_factor, down_factor = self.define_time_segment(sigma)
+        number_of_layers = self.number_of_layers
+        prob = self.calculate_probability(up_factor,down_factor)
+        risk_free = self.interest_rate
+        discount = np.exp(-1*risk_free*self.delta_t)
+        discount_up = discount*prob
+        discount_down = discount*(1-prob)
+        initial_stock_price = self.initial_stock_price
+        if call_or_put == "call":
+            call_or_put = True
+        else:
+            call_or_put = False
+
+        dividend_tups = self.dividend_tups_list
+        
+        price_array = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
+        print("completed forward pass")
+        
+        #return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,dividend_tups)
+
+
         
     
     def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
@@ -153,7 +202,7 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
 
         for i in range(number_of_layers -2, -1,-1):
             if np.int64(i) in first_elements:
-                continuation = 
+                #continuation = 
                 continue
             continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
             intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
@@ -254,8 +303,8 @@ if __name__ == "__main__":
         days_to_expiration = data_sample_1['days_to_expir'].iloc[-1]
         call_tree = binomial_tree_vellekoop(100, stock_price,interest_rate,days_to_expiration, stock_dividend_yield, 'CALL', trial_date_no_div,\
                                             conn_params, 'XOM', last_date, trial_date_no_div)
-        cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-        IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
+        #cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+        #IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
         #print("IV call vals")
         #print(IV_call_vals)
 
@@ -271,6 +320,12 @@ if __name__ == "__main__":
 
         call_tree_divs = binomial_tree_vellekoop(100, stock_price_div, interest_rate_div, days_to_expiration_div,stock_dividend_yield,\
                                                  'CALL',target_date,conn_params, 'XOM', last_date, trial_date_divs)
+        strikes = data_sample_1.loc[is_call, 'strike'].values
+        call_tree_divs.pricing_forward_pass(0.5,strikes[0])
+
+        #cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+        #IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
+        
 
         
 
