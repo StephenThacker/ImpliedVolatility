@@ -46,8 +46,8 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
         self.dividend_df = self.build_dividends_dataframe(conn_params, ticker, target_date, last_date)
         self.last_date = last_date
         self.dividend_tups_list = self.refine_dividends_list(target_date, expiration_date)
-        print("div tups list")
-        print(self.dividend_tups_list)
+        self.indices = [elem[0] for elem in self.dividend_tups_list]
+        print(self.indices)
 
 
 
@@ -71,7 +71,7 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
         
         return pd.DataFrame(columns=['date', 'dividend'])
     
-    def refine_dividends_list(self, start_date: dt.datetime, end_date:dt.datetime) -> list[tuple[dt.date,float]]:
+    def refine_dividends_list(self, start_date: dt.datetime, end_date:dt.datetime) -> list[tuple[int,float]]:
         if self.dividend_df is None or self.dividend_df.empty:
             return []
         
@@ -159,12 +159,14 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
                 price_tree[j,:] = np.maximum(0, price_tree[j,:] - div_sum)
                 j += 1
 
+            div_index = [div[0] for div in dividend_tups]
+            div_values ={div[0] : div[1] for div in dividend_tups}
             '''
             subtract = np.subtract(price_tree,price_tree_initial)
             for i in range(0,len(subtract)):
                 print(i)
                 print(subtract[i])'''
-            return price_tree
+            return price_tree , price_tree_initial, div_index, dividend_tups
         
 
 
@@ -185,15 +187,34 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
 
         dividend_tups = self.dividend_tups_list
         
-        price_array = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
+        price_array_adjusted, initial_price_array, dividend_tups = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
         print("completed forward pass")
         
-        #return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,dividend_tups)
+        return self.backwards_pass_njit(initial_price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,price_array_adjusted, dividend_tups)
 
+    #Can be done outside the optimization loop.
+    # Vellekoop formula is C_{i,j} = V[i,m] + (V[i, m+1] - V[i,m]) * (S[i,j] - Dividend[i]) - S[i,m])/(S[i,m+1]- S[i,m])
+    # where m is such that S[i,m] <= (S[i,j] - Div[i])<= S[i,m+1]
+    # In other words, you subtract the dividend shift at the ex-dividend date n_{D}.
+    # This creates an offset that breaks the recombining tree
+    # So, given a specific node x in the n_{D} layer,
+    # Just before the dividend is subtracted, we partition the stock prices by their nodes in the binomial trees at layer n_{D}, we denote
+    # this partition as \{P_{i,j}\}, where P_{i,j} is the real valued interval \[S_{i,p}, S_{i,p+1}\]. We refer to P as the set of all partitions
+    # We then subtract the dividend value from node value S_{i,j}.
+    # At each node, we associate that node with the partition that the node lies in. 
+    # Since it's possible that the dividend can be big enough to oversubtract, pushing x outside of all of the partitions,
+    # We add an extra partition A =  \[0, S_{i,0}], where S_{i,0} is the lowest stock price in that layer of the binomial tree.
+    # So the resulting structure is P Union A. 
+    # We identify these with the j index  0, ,.,j,.., N
+    # This function assigns the j index of the appropriate partitions to each node in the tree
+    def _sort_array(self,price_array_adjusted,price_array_prior_step):
+        
+
+        return
 
         
     
-    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put):
+    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put, price_array_adjusted, div_index,div_dict):
         if not self.dividend_tups_list:
             return super().backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike,call_or_put)
                 
@@ -204,10 +225,17 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
             options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
 
         for i in range(number_of_layers -2, -1,-1):
-            if np.int64(i) in first_elements:
-                #continuation = 
-                continue
             continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+            if i in div_index:
+                div_value = div_dict[i]
+                price_array_prior_step = np.add(price_array_adjusted[i],div_value)
+
+                numerator_frac = 
+
+                #insert continuation logic here
+                #Need to sort the indices to figure out which ones go to which and calculate continuation value. 
+
+                pass
             intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
             options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
         
