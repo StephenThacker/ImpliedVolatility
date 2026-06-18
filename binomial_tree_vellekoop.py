@@ -142,26 +142,31 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
             price_tree = super().forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor)
             price_tree_initial = price_tree.copy()
             print("initial price tree")
-            dividend_tups = self.dividend_tups_list[::-1]
-            index, div = dividend_tups[0]
-            div_sub = div
-            j = 0
-            for i in range(0,len(price_tree)-1):
-                print(i, index)
-                if i >= index :
-                    price_tree[i,:] = np.maximum(0,price_tree[i,:] - div_sub)
-                    if j +1< len(dividend_tups):
-                        j = j + 1
-                        index,div = dividend_tups[j]
-                        div_sub = div_sub + div
+            dividend_tups = self.dividend_tups_list.copy()  
 
+            div_sum = 0
+            j=0
+            for i in range(0,len(dividend_tups)):
+                indx_i,div = dividend_tups[i]
+                while j < indx_i:
+                    price_tree[j,:] = np.maximum(0, price_tree[j,:] - div_sum)
+                    j += 1
+                div_sum += div
+
+
+            #subtract the remaining elements, if any exist. 
+            while j < len(price_tree):
+                price_tree[j,:] = np.maximum(0, price_tree[j,:] - div_sum)
+                j += 1
+
+            '''
             subtract = np.subtract(price_tree,price_tree_initial)
             for i in range(0,len(subtract)):
                 print(i)
-                print(subtract[i])
+                print(subtract[i])'''
             return price_tree
         
-        
+
 
     def pricing_forward_pass(self,sigma, strike):
         call_or_put = self.call_or_put.lower()
@@ -188,12 +193,10 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
 
         
     
-    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
+    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put):
         if not self.dividend_tups_list:
             return super().backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike,call_or_put)
-        
-        first_elements = [tup[0] for tup in dividend_tups]
-        
+                
         options_array  = np.zeros((number_of_layers,number_of_layers))
         if call_or_put == True:
             options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
