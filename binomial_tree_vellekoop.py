@@ -30,26 +30,36 @@ from data_helpers.ephemeral_db import start_test_db
 from implied_vol import binomial_tree_vectorized, thetadata_options_scrape_EOD, calculate_dates
 
 
-#need try, finally code block here for database management of ephemeral database.
 
-
-class binomial_tree_vellekoop(binomial_tree_vectorized):
+class binomial_tree_vellekoop():
 
     def __init__(self, number_of_layers, initial_stock_price, interest_rate,
                  time_to_expiration, stock_dividend, call_or_put,
                  target_date=None, conn_params = None, ticker = None, last_date = None, expiration_date = None):
         
-        super().__init__(number_of_layers,initial_stock_price, interest_rate, time_to_expiration, stock_dividend, call_or_put)
+
+
+        self.number_of_layers = number_of_layers
+        self.initial_stock_price = initial_stock_price
+        self.time_to_expiration = time_to_expiration
+        self.interest_rate = interest_rate
+        self.dividend = stock_dividend
+        self.call_or_put = call_or_put
+        self.time_to_expiration = self.time_to_expiration/365
+        try:
+            self.delta_t = self.time_to_expiration / (self.number_of_layers -1)
+        except ZeroDivisionError:
+            raise ValueError        
         date_object = calculate_dates()
         self.targ_date = target_date
         self.days_to_expir = int(time_to_expiration)
         self.dividend_df = self.build_dividends_dataframe(conn_params, ticker, target_date, last_date)
         self.last_date = last_date
         self.dividend_tups_list = self.refine_dividends_list(target_date, expiration_date)
+        print(self.dividend_tups_list)
         self.indices = [elem[0] for elem in self.dividend_tups_list]
-        print(self.indices)
-
-
+        self.divs = [elem[1] for elem in self.dividend_tups_list]
+        self.div_dict = {int(k) : v for k,v in self.dividend_tups_list}
 
 
  
@@ -71,6 +81,7 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
         
         return pd.DataFrame(columns=['date', 'dividend'])
     
+    
     def refine_dividends_list(self, start_date: dt.datetime, end_date:dt.datetime) -> list[tuple[int,float]]:
         if self.dividend_df is None or self.dividend_df.empty:
             return []
@@ -86,7 +97,7 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
 
         diff = (dividend_ex_date - self.targ_date).days
 
-        total = (self.last_date - self.targ_date).days
+        total = self.days_to_expir
 
 
         if total == 0:
@@ -95,8 +106,6 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
         index = int(round((diff/total)*(self.number_of_layers-1)))
 
         return index
-    
-
     
     def pull_dividend_db(self, conn_params,ticker:str, start_date:dt.datetime, end_date:dt.datetime):
         sql_query = '''SELECT date, dividend FROM stock_data 
@@ -128,48 +137,66 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
         except Exception as e:
             print(f"Error pulling future dividends: {e}")
             return pd.DataFrame()
+        
+
+    def forward_pass_njit(self, number_of_layers, initial_stock_price, down_factor, up_factor):
+        price_array = np.zeros((number_of_layers,number_of_layers))
+        price_array[0,0] = initial_stock_price
+        for i in range(1,number_of_layers):
+            price_array[i,0] = price_array[i-1,0]*down_factor
+            price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
+        return price_array
+    
+
+    def backwards_pass_njit(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_index_list,div_list, div_dict):
+        options_array  = np.zeros((number_of_layers,number_of_layers))
+        if call_or_put == True:
+            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
+        if call_or_put == False:
+            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
+        for i in range(number_of_layers -2, -1,-1):
 
 
+            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+            if i in div_dict.keys():
+                if call_or_put == True:
+                    expnd_continuation = [0.0] + list(continuation)
+                else:
+                    expnd_continuation = [strike] + list(continuation)
+                ex_div_continuation = self._quotient_calc(price_array,div_dict[i],i, expnd_continuation)
+                continuation = ex_div_continuation
 
+            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
+            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
+
+        return options_array[0,0]
+    
+
+
+    def _quotient_calc(self, price_array, dividend, index, continuation):
+        stock_price_layer = price_array[index]
+        stock_price_layer_zeros = np.array([float(stock_price_layer[i]) for i in range(len(stock_price_layer)) if stock_price_layer[i] != 0])
+        div_subtract = np.maximum(stock_price_layer_zeros - float(dividend),0.0)
+
+        stock_price_layer_full = [0] + stock_price_layer_zeros
+
+        quotient_list = np.zeros(shape = len(stock_price_layer_zeros))
+
+        for i in range(0,len(div_subtract)):
+            for j in range(0,len(stock_price_layer_full)-1):
+                if div_subtract[i] >= stock_price_layer_full[j] and div_subtract[i] <= stock_price_layer_full[j+1]:
+                    try:
+                        quotient_list[i] = continuation[j]+ (continuation[j+1] - continuation[j])*(div_subtract[i] - stock_price_layer_full[j])/(stock_price_layer_full[j+1] \
+                                                                                          - stock_price_layer_full[j])
+                    except Exception as e:
+                        print(e)
+                        quotient_list[i] = 0
+                    break
+                
+        return quotient_list
 
 
     
-
-    def forward_pass_njit(self, number_of_layers, initial_stock_price, down_factor, up_factor):
-        if not self.dividend_tups_list:
-            return super().forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
-        else:
-            price_tree = super().forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor)
-            price_tree_initial = price_tree.copy()
-            print("initial price tree")
-            dividend_tups = self.dividend_tups_list.copy()  
-
-            div_sum = 0
-            j=0
-            for i in range(0,len(dividend_tups)):
-                indx_i,div = dividend_tups[i]
-                while j < indx_i:
-                    price_tree[j,:] = np.maximum(0, price_tree[j,:] - div_sum)
-                    j += 1
-                div_sum += div
-
-
-            #subtract the remaining elements, if any exist. 
-            while j < len(price_tree):
-                price_tree[j,:] = np.maximum(0, price_tree[j,:] - div_sum)
-                j += 1
-
-            div_index = [div[0] for div in dividend_tups]
-            div_values ={div[0] : div[1] for div in dividend_tups}
-            '''
-            subtract = np.subtract(price_tree,price_tree_initial)
-            for i in range(0,len(subtract)):
-                print(i)
-                print(subtract[i])'''
-            return price_tree , price_tree_initial, div_index, dividend_tups
-        
-
-
     def pricing_forward_pass(self,sigma, strike):
         call_or_put = self.call_or_put.lower()
         up_factor, down_factor = self.define_time_segment(sigma)
@@ -184,13 +211,44 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
             call_or_put = True
         else:
             call_or_put = False
+        
+        price_array = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
 
-        dividend_tups = self.dividend_tups_list
         
-        price_array_adjusted, initial_price_array, dividend_tups = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
-        print("completed forward pass")
+        return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, self.indices,\
+                                        self.dividend_tups_list, self.div_dict)
+
+
         
-        return self.backwards_pass_njit(initial_price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,price_array_adjusted, dividend_tups)
+    def vectorization_of_forward_pass(self,sigma, strike):
+        return self.pricing_forward_pass(sigma, strike )
+    
+    def define_time_segment(self,sigma):
+       
+        u = np.exp(sigma * np.sqrt(self.delta_t))
+        d = np.exp(-1*sigma * np.sqrt(self.delta_t))
+        return [u,d]
+    
+    def calculate_probability(self,u,d):
+        try:
+            return (np.exp((self.interest_rate-self.dividend) * self.delta_t) - d) / (u - d)
+        except ZeroDivisionError:
+            raise ValueError("Division by zero in probability calculation (u == d).")
+        
+    def vectorized_brentq_wrapper(self,sigma_low,sigma_high,strike_price,midpoint, xtol=1e-8, rtol=1e-8, maxiter=100):
+        def brentq_objective(sigma):
+            return self.vectorization_of_forward_pass(sigma,strike_price) - midpoint
+
+        try:
+            #start = time.perf_counter()
+            result = brentq(brentq_objective, sigma_low, sigma_high, xtol=1e-8, rtol=1e-8, maxiter=100)
+            #stop = time.perf_counter()
+            #print("time brentq",stop-start)
+            return result
+        except ValueError:
+            return np.nan
+        
+
 
     #Can be done outside the optimization loop.
     # Vellekoop formula is C_{i,j} = V[i,m] + (V[i, m+1] - V[i,m]) * (S[i,j] - Dividend[i]) - S[i,m])/(S[i,m+1]- S[i,m])
@@ -207,78 +265,11 @@ class binomial_tree_vellekoop(binomial_tree_vectorized):
     # So the resulting structure is P Union A. 
     # We identify these with the j index  0, ,.,j,.., N
     # This function assigns the j index of the appropriate partitions to each node in the tree
-    def _sort_array(self,price_array_adjusted,price_array_prior_step):
-        
 
-        return
 
-        
+
+
     
-    def backwards_pass_njit(self, price_array, number_of_layers, discount_up, discount_down, strike, call_or_put, price_array_adjusted, div_index,div_dict):
-        if not self.dividend_tups_list:
-            return super().backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike,call_or_put)
-                
-        options_array  = np.zeros((number_of_layers,number_of_layers))
-        if call_or_put == True:
-            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
-        if call_or_put == False:
-            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
-
-        for i in range(number_of_layers -2, -1,-1):
-            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
-            if i in div_index:
-                div_value = div_dict[i]
-                price_array_prior_step = np.add(price_array_adjusted[i],div_value)
-
-                numerator_frac = 
-
-                #insert continuation logic here
-                #Need to sort the indices to figure out which ones go to which and calculate continuation value. 
-
-                pass
-            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
-            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
-        
-    
-    '''
-    @staticmethod
-    @njit(fastmath = True)
-    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor):
-        return 
-    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor,dividend_tups):
-        if not dividend_tups:
-            #HAve to de-modularize code here, because using NJIT and does not support Python OOP
-            price_array = np.zeros((number_of_layers,number_of_layers))
-            price_array[0,0] = initial_stock_price
-            for i in range(1,number_of_layers):
-                price_array[i,0] = price_array[i-1,0]*down_factor
-                price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
-            return price_array
-        else:
-            pass
-
-    @staticmethod
-    @njit(fastmath = True)
-    def backwards_pass_njit(price_array, number_of_layers, discount_up, discount_down, strike, call_or_put):
-        return '''
-    
-
-    '''
-    def backwards_pass_njit(price_array, number_of_layers, discount_up, discount_down, strike, call_or_put,dividend_tups):
-        if not dividend_tups:
-            options_array  = np.zeros((number_of_layers,number_of_layers))
-            if call_or_put == True:
-                options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
-            if call_or_put == False:
-                options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
-            for i in range(number_of_layers -2, -1,-1):
-                continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
-                intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
-                options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
-
-            return options_array[0,0]
-        else:
-            pass'''
     
 
 def test_db_func(conn_params):
@@ -296,70 +287,171 @@ def test_db_func(conn_params):
 
     for row in results:
         print(row)
-        
 
 
+def plot_options_surface(ticker, strikes, implied_vols, days_to_exp, stock_price,
+                         interp_method='linear',
+                         fixed_logm_min=None, fixed_logm_max=None,
+                         fixed_mat_min=None, fixed_mat_max=None):
+
+    strikes = np.asarray(strikes, dtype=float)
+    implied_vols = np.asarray(implied_vols, dtype=float)
+
+    if np.isscalar(days_to_exp):
+        maturities = np.full_like(strikes, float(days_to_exp))
+    else:
+        maturities = np.asarray(days_to_exp, dtype=float)
+
+    last_stock_price = float(stock_price)
+
+    # 1. Calculate log-moneyness ln(K / S) first so we can filter by it
+    log_moneyness = np.log(strikes / last_stock_price)
+
+    # 2. Apply new filters: IV <= 1.0, Expiration <= 350, Log-Moneyness between -1.0 and 0.5
+    mask = (
+        (~np.isnan(implied_vols)) & 
+        (implied_vols > 0)
+    )
+
+    strikes = strikes[mask]
+    implied_vols = implied_vols[mask]
+    maturities = maturities[mask]
+    log_moneyness = log_moneyness[mask]
+
+    if len(strikes) == 0:
+        print("No valid option data available for plotting after applying filters.")
+        return
+
+    # Create 2D interpolation grids
+    logm_grid = np.linspace(
+        fixed_logm_min if fixed_logm_min is not None else log_moneyness.min(),
+        fixed_logm_max if fixed_logm_max is not None else log_moneyness.max(), 50)
+
+    maturity_grid = np.linspace(
+        fixed_mat_min if fixed_mat_min is not None else maturities.min(),
+        fixed_mat_max if fixed_mat_max is not None else maturities.max(), 50)
+
+    M_grid, LM_grid = np.meshgrid(maturity_grid, logm_grid)
+
+    # Interpolate 3D IV grid across Days to Expiration and Log-Moneyness
+    IV_grid = griddata(
+        points=(maturities, log_moneyness),
+        values=implied_vols,
+        xi=(M_grid, LM_grid),
+        method=interp_method
+    )
+
+    fig = go.Figure(data=[go.Surface(
+        x=M_grid,
+        y=LM_grid,
+        z=IV_grid,
+        colorscale='Viridis',
+        colorbar=dict(title="Implied Volatility")
+    )])
+
+    fig.update_layout(
+        title=f"Implied Volatility Surface (Log-Moneyness) for {ticker}",
+        scene=dict(
+            xaxis_title='Days to Expiration',
+            yaxis_title='Log-Moneyness ln(K/S)',
+            zaxis_title='Implied Volatility',
+        ),
+        autosize=True,
+        width=800,
+        height=700
+    )
+    fig.show()
+
+    return [M_grid, LM_grid, IV_grid]
 
 
 if __name__ == "__main__":
     postgres = None
     try:
         conn_params, postgres = start_test_db()
-        #print(conn_params)
 
-        #test_db_func(conn_params)
-
-
+        ticker = 'CVX'
         target_date = date(2026, 5, 18)
-
 
         theta_data_object = thetadata_options_scrape_EOD()
 
-        expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, 'XOM', target_date)
+        # Fetch available expiration dates
+        expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
+        if not expirations_list:
+            print(f"No expiration dates found for ticker {ticker} on target date {target_date}.")
+        else:
+            last_date = expirations_list[-1]
 
-        trial_date_no_div= expirations_list[0]
-        print(type(trial_date_no_div))
-        trial_date_divs = expirations_list[11]
-        last_date = expirations_list[-1]
+            all_strikes = []
+            all_implied_vols = []
+            all_days_to_exp = []
+            latest_stock_price = None
 
-        data_sample_1 = theta_data_object.pulling_all_options_data_for_pricing(conn_params, 'XOM', target_date, trial_date_no_div)
+            # Iterate through all expiration dates to construct full surface arguments
+            for exp_date in expirations_list:
+                try:
+                    data_sample = theta_data_object.pulling_all_options_data_for_pricing(
+                        conn_params, ticker, target_date, exp_date
+                    )
+                    
+                    if data_sample is None or data_sample.empty:
+                        continue
 
-        is_call = data_sample_1['option_type'] == 'CALL'
-        is_put = data_sample_1['option_type'] == 'PUT'
+                    # Filter for CALL options
+                    is_call = data_sample['option_type'] == 'PUT'
+                    call_data = data_sample.loc[is_call]
 
-        stock_price = data_sample_1['stock_price'].iloc[-1]
-        interest_rate = data_sample_1['risk_free'].iloc[-1]
-        stock_dividend_yield = 0 #Not relevant for this version
-        days_to_expiration = data_sample_1['days_to_expir'].iloc[-1]
-        call_tree = binomial_tree_vellekoop(100, stock_price,interest_rate,days_to_expiration, stock_dividend_yield, 'CALL', trial_date_no_div,\
-                                            conn_params, 'XOM', last_date, trial_date_no_div)
-        #cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-        #IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
-        #print("IV call vals")
-        #print(IV_call_vals)
+                    if call_data.empty:
+                        continue
 
+                    stock_price = call_data['stock_price'].iloc[-1]
+                    latest_stock_price = stock_price
+                    interest_rate = call_data['risk_free'].iloc[-1]
+                    days_to_exp = call_data['days_to_expir'].iloc[-1]
+                    strikes = call_data['strike'].values
+                    midpoints = call_data['midpoint'].values
 
+                    # Build binomial tree model for pricing/IV calibration
+                    call_tree = binomial_tree_vellekoop(
+                        number_of_layers=500,
+                        initial_stock_price=stock_price,
+                        interest_rate=interest_rate,
+                        time_to_expiration=days_to_exp,
+                        stock_dividend=0,
+                        call_or_put='PUT',
+                        target_date=target_date,
+                        conn_params=conn_params,
+                        ticker=ticker,
+                        last_date=last_date,
+                        expiration_date=exp_date
+                    )
 
+                    # Solve for IVs vectorially
+                    cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+                    IV_call_vals = cal_vec_func(0.01, 5.0, strikes, midpoints)
 
-        data_sample_2 = theta_data_object.pulling_all_options_data_for_pricing(conn_params, 'XOM', target_date, trial_date_divs)
+                    # Append parameters to master arrays
+                    all_strikes.extend(strikes)
+                    all_implied_vols.extend(IV_call_vals)
+                    all_days_to_exp.extend([days_to_exp] * len(strikes))
 
-        stock_price_div = data_sample_2['stock_price'].iloc[-1]
-        interest_rate_div = data_sample_2['risk_free'].iloc[-1]
-        stock_dividend_yield = 0 #Not relevant for this version
-        days_to_expiration_div = data_sample_2['days_to_expir'].iloc[-1]
+                except Exception as e:
+                    print(f"Skipping expiration {exp_date} due to error: {e}")
+                    continue
 
-        call_tree_divs = binomial_tree_vellekoop(100, stock_price_div, interest_rate_div, days_to_expiration_div,stock_dividend_yield,\
-                                                 'CALL',target_date,conn_params, 'XOM', last_date, trial_date_divs)
-        strikes = data_sample_1.loc[is_call, 'strike'].values
-        call_tree_divs.pricing_forward_pass(0.5,strikes[0])
-
-        #cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-        #IV_call_vals = cal_vec_func(0.01, 5, data_sample_1.loc[is_call, 'strike'].values, data_sample_1.loc[is_call, 'midpoint'].values)
-        
-
-        
-
+            # Plot option surface using all collected expirations
+            if len(all_strikes) > 0 and latest_stock_price is not None:
+                plot_options_surface(
+                    ticker=ticker,
+                    strikes=all_strikes,
+                    implied_vols=all_implied_vols,
+                    days_to_exp=all_days_to_exp,
+                    stock_price=latest_stock_price,
+                    interp_method='linear'
+                )
+            else:
+                print("Insufficient data gathered across expirations to construct surface.")
 
     finally:
         if postgres is not None:

@@ -390,7 +390,6 @@ def store_stock_dividends_yfinance(ticker, date_start,date_end, conn_params):
 
     rows_affected = 0
     pandas_generator = df.itertuples(index = False, name = None)
-    print(next(pandas_generator))
     try:
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
@@ -701,7 +700,6 @@ def store_nightly_interest_rate(conn_params):
         sql_insert = '''INSERT INTO market_data (date, risk_free_rate) VALUES (%s, %s)
                          ON CONFLICT (date) DO UPDATE SET
                          risk_free_rate = EXCLUDED.risk_free_rate'''
-        print("1")
         with psycopg2.connect(**conn_params) as conn:
             with conn.cursor() as cur:
                 for row in data['refRates']:
