@@ -243,7 +243,7 @@ def initialize_stock_data_table(conn_params):
        low DOUBLE PRECISION DEFAULT 0,
        volume BIGINT DEFAULT 0,
        special_dividend DOUBLE PRECISION DEFAULT 0,
-       outstanding_shares BIGINT DEFAULT 0,
+       shares_outstanding BIGINT DEFAULT 0,
 
 
        PRIMARY KEY (ticker, date)
@@ -931,76 +931,80 @@ def get_sp500_changes():
     - Key   = dt.date object
     - Value = list[str] of signed tickers (added first, then removed)
     """
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
-    }
-    
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    
-    soup = BeautifulSoup(response.text, "html.parser")
-    
-    headline = soup.find("span", id=lambda x: x and "Selected_changes_to_the_list_of_S" in x)
-    if not headline:
-        raise ValueError("Could not find the 'Selected changes' section on Wikipedia.")
-    
-    h2 = headline.find_parent("h2")
-    if not h2:
-        raise ValueError("Could not find the heading for S&P 500 changes.")
-    
-    table = h2.find_next_sibling("table", class_="wikitable")
-    if not table:
-        for t in soup.find_all("table", class_="wikitable"):
-            text = t.get_text().lower()
-            if "date" in text and "added" in text and "removed" in text:
-                table = t
-                break
-    
-    if not table:
-        raise ValueError("Could not find the S&P 500 changes table on Wikipedia.")
-    
-    changes = defaultdict(lambda: {"+": [], "-": []})
-    
-    rows = table.find_all("tr")
-    
-    for row in rows[2:]:  # skip the two header rows
-        cells = row.find_all("td")
-        if len(cells) < 4:
-            continue
+    try:
+        url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
         
-        date_str = cells[0].get_text(strip=True)
-        if not date_str or date_str.lower() in ("", "date", "nan"):
-            continue
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+        }
         
-        try:
-            date_obj = dt.datetime.strptime(date_str, "%B %d, %Y").date()
-        except ValueError:
-            continue
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
         
-        # Added ticker
-        added_cell = cells[1].get_text(strip=True)
-        if added_cell and added_cell.lower() not in ("nan", "—", "–", ""):
-            ticker = added_cell.split(maxsplit=1)[0].strip().upper()
-            if ticker:
-                changes[date_obj]["+"].append(ticker)
+        soup = BeautifulSoup(response.text, "html.parser")
         
-        # Removed ticker
-        removed_cell = cells[3].get_text(strip=True)
-        if removed_cell and removed_cell.lower() not in ("nan", "—", "–", ""):
-            ticker = removed_cell.split(maxsplit=1)[0].strip().upper()
-            if ticker:
-                changes[date_obj]["-"].append(ticker)
-    
-    # Build result as dict[date, list[str]]
-    result = {}
-    for date_obj, data in changes.items():
-        signed_list = [f"+{t}" for t in data["+"]] + [f"-{t}" for t in data["-"]]
-        if signed_list:
-            result[date_obj] = signed_list
-    
+        headline = soup.find("span", id=lambda x: x and "Selected_changes_to_the_list_of_S" in x)
+        if not headline:
+            raise ValueError("Could not find the 'Selected changes' section on Wikipedia.")
+        
+        h2 = headline.find_parent("h2")
+        if not h2:
+            raise ValueError("Could not find the heading for S&P 500 changes.")
+        
+        table = h2.find_next_sibling("table", class_="wikitable")
+        if not table:
+            for t in soup.find_all("table", class_="wikitable"):
+                text = t.get_text().lower()
+                if "date" in text and "added" in text and "removed" in text:
+                    table = t
+                    break
+        
+        if not table:
+            raise ValueError("Could not find the S&P 500 changes table on Wikipedia.")
+        
+        changes = defaultdict(lambda: {"+": [], "-": []})
+        
+        rows = table.find_all("tr")
+        
+        for row in rows[2:]:  # skip the two header rows
+            cells = row.find_all("td")
+            if len(cells) < 4:
+                continue
+            
+            date_str = cells[0].get_text(strip=True)
+            if not date_str or date_str.lower() in ("", "date", "nan"):
+                continue
+            
+            try:
+                date_obj = dt.datetime.strptime(date_str, "%B %d, %Y").date()
+            except ValueError:
+                continue
+            
+            # Added ticker
+            added_cell = cells[1].get_text(strip=True)
+            if added_cell and added_cell.lower() not in ("nan", "—", "–", ""):
+                ticker = added_cell.split(maxsplit=1)[0].strip().upper()
+                if ticker:
+                    changes[date_obj]["+"].append(ticker)
+            
+            # Removed ticker
+            removed_cell = cells[3].get_text(strip=True)
+            if removed_cell and removed_cell.lower() not in ("nan", "—", "–", ""):
+                ticker = removed_cell.split(maxsplit=1)[0].strip().upper()
+                if ticker:
+                    changes[date_obj]["-"].append(ticker)
+        
+        # Build result as dict[date, list[str]]
+        result = {}
+        for date_obj, data in changes.items():
+            signed_list = [f"+{t}" for t in data["+"]] + [f"-{t}" for t in data["-"]]
+            if signed_list:
+                result[date_obj] = signed_list
+    except Exception as e:
+        print(e)
+        return {}
+
     return result
 
 
@@ -1026,8 +1030,8 @@ def store_S_and_P_changes(conn_params):
             cur.execute(sql_manual_test)
             results = cur.fetchall()
 
-    for row in results:
-        print(row)
+    #for row in results:
+    #    print(row)
 
    
 
@@ -1089,22 +1093,3 @@ if __name__ == "__main__":
     
     create_future_prediction_data(conn_params)
     
-    #add_outstanding_shares_column(conn_params)
-
-    #store_S_and_P_changes(conn_params)
-    #df1, df2 = scrape_finviz_dividend_json("BKE")
-
-    #scrape_finviz_for_dividend_data(conn_params)
-    #print("finviz routine finished")
-
-    #iterate_through_S_and_P_store_dividend_yields()
-
-
-    '''
-    start_date = '2018-01-01'
-    soft_start_date = dt.datetime.strptime(start_date,"%Y-%m-%d") - timedelta(days = 700)
-    soft_start_date = dt.datetime.strftime(soft_start_date.date(), "%Y-%m-%d")
-    end_date_dt = dt.datetime.today().date()
-    end_date = dt.datetime.strftime(end_date_dt, "%Y-%m-%d")
-    iterate_through_S_and_P_store_dividends(start_date, end_date, conn_params)
-    iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params)'''

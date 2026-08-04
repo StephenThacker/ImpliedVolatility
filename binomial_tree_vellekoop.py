@@ -56,7 +56,6 @@ class binomial_tree_vellekoop():
         self.dividend_df = self.build_dividends_dataframe(conn_params, ticker, target_date, last_date)
         self.last_date = last_date
         self.dividend_tups_list = self.refine_dividends_list(target_date, expiration_date)
-        print(self.dividend_tups_list)
         self.indices = [elem[0] for elem in self.dividend_tups_list]
         self.divs = [elem[1] for elem in self.dividend_tups_list]
         self.div_dict = {int(k) : v for k,v in self.dividend_tups_list}
@@ -378,6 +377,8 @@ if __name__ == "__main__":
         # Fetch available expiration dates
         expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
+
+        
         if not expirations_list:
             print(f"No expiration dates found for ticker {ticker} on target date {target_date}.")
         else:

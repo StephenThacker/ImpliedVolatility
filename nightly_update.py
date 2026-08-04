@@ -53,4 +53,4 @@ if __name__ == "__main__":
     start_date = today - timedelta(days=0)
 
 
-    nightly_update(start_date, today)
+    nightly_update(today, today)
