@@ -65,19 +65,6 @@ def generate_future_dividend_predictions(conn_params, ticker: str):
         conn.commit()
 
 
-    #Manual test code
-    Test_query = '''SELECT * FROM future_predictions WHERE ticker = %s'''
-    args = [ticker]
-
-    results = []
-    with psycopg2.connect(**conn_params) as conn:
-        with conn.cursor() as cur:
-            cur.execute(Test_query, args)
-            results = cur.fetchall()
-
-    for row in results:
-        print(row)
-
     return
 
 

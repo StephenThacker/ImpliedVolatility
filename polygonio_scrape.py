@@ -109,7 +109,7 @@ def store_special_divs_in_database_polyio(cur,ticker, results: Dict):
         
     sql_insert = '''INSERT INTO stock_data (date, ticker, special_dividend ) VALUES %s
                     ON CONFLICT (date,ticker) DO UPDATE SET
-                    dividend = EXCLUDED.dividend'''
+                    dividend = EXCLUDED.special_dividend'''
     
 
     if dividend_list:

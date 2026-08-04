@@ -121,11 +121,6 @@ def get_S_and_P_composite(conn_params, start_date: dt.datetime, end_date: dt.dat
 
 
 
-
-
-    return
-
-
 if __name__ == "__main__":
     conn_params = {
     "host": "localhost",
@@ -155,31 +150,3 @@ if __name__ == "__main__":
 
     if 'VEEV' in results:
         print('VEEV in results')
-
-    '''
-    print("checking first one")
-    test_1 = get_S_and_P_for_date(conn_params,test_date_1)
-    if 'CTRA' in test_1:
-        print('CTRA',' passed')
-    if 'CTRA' not in test_1:
-        print('CTRA', "failed")
-    
-    if 'VEEV' in test_1:
-        print("Veev failed")
-    else:
-        print('VEEV passed')
-
-
-    print("checking second one")
-    test_2 =  get_S_and_P_for_date(conn_params,test_date_2)
-
-
-    if 'CTRA' in test_2:
-        print('CTRA',' failed')
-    if 'CTRA' not in test_2:
-        print('CTRA', "passed")
-    
-    if 'VEEV' in test_2:
-        print("Veev passed")
-    else:
-        print('VEEV failed')'''
