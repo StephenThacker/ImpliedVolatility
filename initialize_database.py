@@ -460,26 +460,6 @@ def store_stock_price_history_yfinance(ticker,start_date = None, end_date = None
         print(e)
 
 
-    #Check if worked
-    
-    query_first = "SELECT * FROM stock_data WHERE ticker = %s ORDER BY date ASC LIMIT 100;"
-    query_last = "SELECT * FROM stock_data WHERE ticker = %s ORDER BY date DESC LIMIT 100;"
-
-    args_first = [ticker]
-    args_second = [ticker]
-
-    try:
-            with psycopg2.connect(**conn_params) as conn:
-                df_first = pd.read_sql_query(query_first, conn, params=args_first)
-                
-                df_last = pd.read_sql_query(query_last, conn, params= args_second)
-
-                print(df_first)
-                
-                print(df_last.sort_values('date'))
-
-    except Exception as e:
-        print(e)
     
 
 def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, conn_params):
@@ -562,26 +542,6 @@ def calculate_and_store_dividend_yields_database(ticker, start_date, end_date, c
         print(f"Database update failed for {ticker}: {e}")
 
     
-    query_first = "SELECT date, div_yield_per FROM stock_data WHERE ticker = %s ORDER BY date ASC LIMIT 10;"
-    query_last = "SELECT date, div_yield_per FROM stock_data WHERE ticker = %s ORDER BY date DESC LIMIT 10;"
-
-    args_first =   [ticker]
-    args_second = [ticker]
-
-    try:
-            with psycopg2.connect(**conn_params) as conn:
-                df_first = pd.read_sql_query(query_first, conn, params=args_first)
-                
-                df_last = pd.read_sql_query(query_last, conn, params= args_second)
-
-                print(df_first)
-                
-                print(df_last.sort_values('date'))
-
-    except Exception as e:
-        print(e)
-
-    return
 
 def iterate_through_S_and_P_store_dividend_yields(start_date, end_date,conn_params):
 
@@ -1022,18 +982,6 @@ def store_S_and_P_changes(conn_params):
         with conn.cursor() as cur:
             execute_values(cur,sql_query,to_sql)
 
-    
-    sql_manual_test = ''' SELECT (date, s_and_p_changes) FROM market_data '''
-
-    with psycopg2.connect(**conn_params) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql_manual_test)
-            results = cur.fetchall()
-
-    #for row in results:
-    #    print(row)
-
-   
 
     return
 

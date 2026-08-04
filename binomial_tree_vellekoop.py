@@ -14,6 +14,8 @@ import os
 import psycopg2
 import time
 from numba import njit, prange
+from numba import types
+from numba.typed import Dict
 import httpx
 import io
 from datetime import date, timedelta
@@ -125,9 +127,13 @@ class binomial_tree_vellekoop():
     def pull_future_dividends_estimation(self, conn_params,ticker:str, start_date:dt.datetime, end_date:dt.datetime):
         sql_query = '''SELECT future_date as date, estimated_dividend as dividend FROM future_predictions 
                        WHERE ticker = %s AND future_date >= %s AND future_date <= %s AND estimated_dividend > 0
+                       AND date_of_creation = (
+                       SELECT MAX(date_of_creation)
+                       FROM future_predictions
+                       WHERE ticker = %s)
                        ORDER BY future_date ASC'''
         
-        args = [ticker, start_date, end_date]
+        args = [ticker, start_date, end_date, ticker]
         
         try:
             with psycopg2.connect(**conn_params) as conn:
@@ -136,9 +142,11 @@ class binomial_tree_vellekoop():
         except Exception as e:
             print(f"Error pulling future dividends: {e}")
             return pd.DataFrame()
-        
 
-    def forward_pass_njit(self, number_of_layers, initial_stock_price, down_factor, up_factor):
+        
+    @staticmethod
+    @njit(fastmath = True)
+    def forward_pass_njit(number_of_layers, initial_stock_price, down_factor, up_factor):
         price_array = np.zeros((number_of_layers,number_of_layers))
         price_array[0,0] = initial_stock_price
         for i in range(1,number_of_layers):
@@ -147,14 +155,13 @@ class binomial_tree_vellekoop():
         return price_array
     
 
-    def backwards_pass_njit(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_index_list,div_list, div_dict):
+    def backwards_pass_njit(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_dict):
         options_array  = np.zeros((number_of_layers,number_of_layers))
         if call_or_put == True:
             options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
         if call_or_put == False:
             options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
         for i in range(number_of_layers -2, -1,-1):
-
 
             continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
             if i in div_dict.keys():
@@ -197,6 +204,10 @@ class binomial_tree_vellekoop():
 
     
     def pricing_forward_pass(self,sigma, strike):
+        numba_dict = Dict.empty(key_type = types.int64, value_type = types.float64)
+        for key, value in self.div_dict.items():
+            numba_dict[key] = value
+                        
         call_or_put = self.call_or_put.lower()
         up_factor, down_factor = self.define_time_segment(sigma)
         number_of_layers = self.number_of_layers
@@ -214,8 +225,8 @@ class binomial_tree_vellekoop():
         price_array = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
 
         
-        return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, self.indices,\
-                                        self.dividend_tups_list, self.div_dict)
+        return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,
+                                        self.div_dict)
 
 
         

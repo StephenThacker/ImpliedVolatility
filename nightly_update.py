@@ -50,7 +50,7 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
 if __name__ == "__main__":
 
     today = dt.datetime.today()
-    start_date = today - timedelta(days=0)
+    start_date = today - timedelta(days=1)
 
 
-    nightly_update(today, today)
+    nightly_update(start_date, start_date)
