@@ -153,6 +153,53 @@ class binomial_tree_vellekoop():
             price_array[i,0] = price_array[i-1,0]*down_factor
             price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
         return price_array
+
+    def backwards_pass_njit2(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_dict):
+        options_array  = np.zeros((number_of_layers,number_of_layers))
+        if call_or_put == True:
+            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
+        if call_or_put == False:
+            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
+        for i in range(number_of_layers -2, -1,-1):
+
+            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
+            if i in div_dict.keys():
+                if call_or_put == True:
+                    expnd_continuation = [0.0] + list(continuation)
+                else:
+                    expnd_continuation = [strike] + list(continuation)
+                ex_div_continuation = self._quotient_calc2(price_array,div_dict[i],i, expnd_continuation)
+                continuation = ex_div_continuation
+
+            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
+            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
+
+        return options_array[0,0]
+    
+
+
+    def _quotient_calc2(self, price_array, dividend, index, continuation):
+
+        stock_price_layer = price_array[index]
+        stock_price_layer_zeros = np.array([float(stock_price_layer[i]) for i in range(len(stock_price_layer)) if stock_price_layer[i] != 0])
+        div_subtract = np.maximum(stock_price_layer_zeros - float(dividend),0.0)
+
+        stock_price_layer_full = [0] + stock_price_layer_zeros
+
+        quotient_list = np.zeros(shape = len(stock_price_layer_zeros))
+
+        for i in range(0,len(div_subtract)):
+            for j in range(0,len(stock_price_layer_full)-1):
+                if div_subtract[i] >= stock_price_layer_full[j] and div_subtract[i] <= stock_price_layer_full[j+1]:
+                    try:
+                        quotient_list[i] = continuation[j]+ (continuation[j+1] - continuation[j])*(div_subtract[i] - stock_price_layer_full[j])/(stock_price_layer_full[j+1] \
+                                                                                          - stock_price_layer_full[j])
+                    except Exception as e:
+                        print(e)
+                        quotient_list[i] = 0
+                    break
+                
+        return quotient_list
     
 
     def backwards_pass_njit(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_dict):
@@ -180,6 +227,7 @@ class binomial_tree_vellekoop():
 
 
     def _quotient_calc(self, price_array, dividend, index, continuation):
+
         stock_price_layer = price_array[index]
         stock_price_layer_zeros = np.array([float(stock_price_layer[i]) for i in range(len(stock_price_layer)) if stock_price_layer[i] != 0])
         div_subtract = np.maximum(stock_price_layer_zeros - float(dividend),0.0)
@@ -207,7 +255,10 @@ class binomial_tree_vellekoop():
         numba_dict = Dict.empty(key_type = types.int64, value_type = types.float64)
         for key, value in self.div_dict.items():
             numba_dict[key] = value
-                        
+
+        print(numba_dict)
+        print(self.div_dict)
+
         call_or_put = self.call_or_put.lower()
         up_factor, down_factor = self.define_time_segment(sigma)
         number_of_layers = self.number_of_layers
@@ -279,7 +330,7 @@ class binomial_tree_vellekoop():
 
 
 
-    
+
     
 
 def test_db_func(conn_params):
@@ -374,6 +425,73 @@ def plot_options_surface(ticker, strikes, implied_vols, days_to_exp, stock_price
 
     return [M_grid, LM_grid, IV_grid]
 
+def write_datasample_to_file(data_sample, call_type):
+    return
+
+def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_or_put):
+
+    all_strikes = []
+    all_implied_vols = []
+    all_days_to_exp = []
+    latest_stock_price = None
+
+    last_date = expiration_list[-1]
+
+    for exp in expiration_list:
+        current_data = get_data_per_expiration(conn_params,ticker, target_date, exp, call_or_put)
+
+        stock_price = current_data['stock_price'].iloc[-1]
+        latest_stock_price = stock_price
+        interest_rate = current_data['risk_free'].iloc[-1]
+        days_to_exp = current_data['days_to_expir'].iloc[-1]
+        strikes = current_data['strike'].values
+        midpoints = current_data['midpoint'].values
+
+        IV_call_vals = generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
+            ticker, last_date, exp, strikes, midpoints)
+
+        all_strikes.extend(strikes)
+        all_implied_vols.extend(IV_call_vals)
+        all_days_to_exp.extend([days_to_exp] * len(strikes))
+
+    if len(all_strikes) > 0 and latest_stock_price is not None:
+        plot_options_surface(ticker, all_strikes,all_implied_vols, all_days_to_exp,latest_stock_price,interp_method='linear')
+
+    return
+
+def generate_and_solve_tree_per_expiration(conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,  midpoints):
+    call_tree = binomial_tree_vellekoop(number_of_layers=number_of_layers,
+                        initial_stock_price=stock_price,
+                        interest_rate=interest_rate,
+                        time_to_expiration=days_to_exp,
+                        stock_dividend=0,
+                        call_or_put='PUT',
+                        target_date=target_date,
+                        conn_params=conn_params,
+                        ticker=ticker,
+                        last_date=last_date,
+                        expiration_date=exp_date
+                    )
+    cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+    IV_call_vals = cal_vec_func(0.01, 5.0, strikes, midpoints)
+
+
+    return IV_call_vals
+
+def get_data_per_expiration(conn_params, ticker, target_date,expiration, call_or_put:str):
+
+    data_sample = theta_data_object.pulling_all_options_data_for_pricing(conn_params, ticker, target_date,expiration)
+
+    if data_sample is None or data_sample.empty:
+        raise ValueError("No data found")
+
+    call_or_put_mask = data_sample['option_type'] == call_or_put
+
+    filtered_data = data_sample[call_or_put_mask]
+
+    
+    return filtered_data
+
 
 if __name__ == "__main__":
     postgres = None
@@ -389,81 +507,8 @@ if __name__ == "__main__":
         expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
 
-        
-        if not expirations_list:
-            print(f"No expiration dates found for ticker {ticker} on target date {target_date}.")
-        else:
-            last_date = expirations_list[-1]
+        plot_data_for_group(conn_params, ticker, target_date, expirations_list, 'PUT')
 
-            all_strikes = []
-            all_implied_vols = []
-            all_days_to_exp = []
-            latest_stock_price = None
-
-            # Iterate through all expiration dates to construct full surface arguments
-            for exp_date in expirations_list:
-                try:
-                    data_sample = theta_data_object.pulling_all_options_data_for_pricing(
-                        conn_params, ticker, target_date, exp_date
-                    )
-                    
-                    if data_sample is None or data_sample.empty:
-                        continue
-
-                    # Filter for CALL options
-                    is_call = data_sample['option_type'] == 'PUT'
-                    call_data = data_sample.loc[is_call]
-
-                    if call_data.empty:
-                        continue
-
-                    stock_price = call_data['stock_price'].iloc[-1]
-                    latest_stock_price = stock_price
-                    interest_rate = call_data['risk_free'].iloc[-1]
-                    days_to_exp = call_data['days_to_expir'].iloc[-1]
-                    strikes = call_data['strike'].values
-                    midpoints = call_data['midpoint'].values
-
-                    # Build binomial tree model for pricing/IV calibration
-                    call_tree = binomial_tree_vellekoop(
-                        number_of_layers=500,
-                        initial_stock_price=stock_price,
-                        interest_rate=interest_rate,
-                        time_to_expiration=days_to_exp,
-                        stock_dividend=0,
-                        call_or_put='PUT',
-                        target_date=target_date,
-                        conn_params=conn_params,
-                        ticker=ticker,
-                        last_date=last_date,
-                        expiration_date=exp_date
-                    )
-
-                    # Solve for IVs vectorially
-                    cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-                    IV_call_vals = cal_vec_func(0.01, 5.0, strikes, midpoints)
-
-                    # Append parameters to master arrays
-                    all_strikes.extend(strikes)
-                    all_implied_vols.extend(IV_call_vals)
-                    all_days_to_exp.extend([days_to_exp] * len(strikes))
-
-                except Exception as e:
-                    print(f"Skipping expiration {exp_date} due to error: {e}")
-                    continue
-
-            # Plot option surface using all collected expirations
-            if len(all_strikes) > 0 and latest_stock_price is not None:
-                plot_options_surface(
-                    ticker=ticker,
-                    strikes=all_strikes,
-                    implied_vols=all_implied_vols,
-                    days_to_exp=all_days_to_exp,
-                    stock_price=latest_stock_price,
-                    interp_method='linear'
-                )
-            else:
-                print("Insufficient data gathered across expirations to construct surface.")
 
     finally:
         if postgres is not None:
