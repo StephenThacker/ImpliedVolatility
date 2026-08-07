@@ -264,6 +264,26 @@ class binomial_tree_vellekoop():
             return result
         except ValueError:
             return np.nan
+
+    @classmethod
+    def generate_and_solve_tree_per_expiration(self, conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,  midpoints):
+        call_tree = binomial_tree_vellekoop(number_of_layers=number_of_layers,
+                            initial_stock_price=stock_price,
+                            interest_rate=interest_rate,
+                            time_to_expiration=days_to_exp,
+                            stock_dividend=0,
+                            call_or_put='PUT',
+                            target_date=target_date,
+                            conn_params=conn_params,
+                            ticker=ticker,
+                            last_date=last_date,
+                            expiration_date=exp_date
+                        )
+        cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
+        IV_call_vals = cal_vec_func(0.01, 5.0, strikes, midpoints)
+
+
+        return IV_call_vals
         
 
 
@@ -401,7 +421,7 @@ def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_
         strikes = current_data['strike'].values
         midpoints = current_data['midpoint'].values
 
-        IV_call_vals = generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
+        IV_call_vals = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
             ticker, last_date, exp, strikes, midpoints)
 
         all_strikes.extend(strikes)
@@ -413,24 +433,7 @@ def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_
 
     return
 
-def generate_and_solve_tree_per_expiration(conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,  midpoints):
-    call_tree = binomial_tree_vellekoop(number_of_layers=number_of_layers,
-                        initial_stock_price=stock_price,
-                        interest_rate=interest_rate,
-                        time_to_expiration=days_to_exp,
-                        stock_dividend=0,
-                        call_or_put='PUT',
-                        target_date=target_date,
-                        conn_params=conn_params,
-                        ticker=ticker,
-                        last_date=last_date,
-                        expiration_date=exp_date
-                    )
-    cal_vec_func = np.vectorize(call_tree.vectorized_brentq_wrapper, otypes=[float])
-    IV_call_vals = cal_vec_func(0.01, 5.0, strikes, midpoints)
 
-
-    return IV_call_vals
 
 def get_data_per_expiration(conn_params, ticker, target_date,expiration, call_or_put:str):
 
