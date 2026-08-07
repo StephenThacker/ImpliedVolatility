@@ -7,8 +7,8 @@ from datetime import timedelta
 from utils import get_S_and_P_composite
 
 
-def iterate_composite_tickers_dividend_prediction(conn_params, ticker: str):
-    start_date = dt.datetime.today() - timedelta(days=2000)
+def iterate_composite_tickers_dividend_prediction(conn_params):
+    start_date = dt.datetime.today() - timedelta(days=500)
     end_date = dt.datetime.today()
     tickers = get_S_and_P_composite(conn_params,start_date, end_date)
 
@@ -16,6 +16,8 @@ def iterate_composite_tickers_dividend_prediction(conn_params, ticker: str):
         generate_future_dividend_predictions(conn_params, ticker)
     return
 
+
+#Can be modified to have distributions/year and then you just adjust the range, based on the number of distributions. 
 def pull_last_dividend_date(conn_params, ticker:str):
     start_date = dt.datetime.today() - timedelta(days=95)
     end_date = dt.datetime.today() + timedelta(days = 95)
@@ -78,5 +80,5 @@ if __name__ == "__main__":
     "password": os.getenv("DB_PASSWORD"),
     "port": "5432"
     }
-    iterate_composite_tickers_dividend_prediction(conn_params, 'AAPL')
+    iterate_composite_tickers_dividend_prediction(conn_params)
 

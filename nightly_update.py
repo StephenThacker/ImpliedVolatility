@@ -6,6 +6,7 @@ from implied_vol import thetadata_options_scrape_EOD
 import datetime as dt
 from datetime import timedelta
 from polygonio_scrape import pull_div_data_poly_for_all
+from future_dividend_predictions import iterate_composite_tickers_dividend_prediction
 
 load_dotenv()
 
@@ -40,6 +41,8 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
     if dividend_results:
         iterate_through_S_and_P_store_dividend_yields(start_date, end_date, conn_params)
         print("dividends stored")
+
+    iterate_composite_tickers_dividend_prediction(conn_params)
     
     options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
     print("completed Black Scholes")

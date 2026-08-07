@@ -153,8 +153,32 @@ class binomial_tree_vellekoop():
             price_array[i,0] = price_array[i-1,0]*down_factor
             price_array[i,1:i+1] = price_array[i-1,0:i]*up_factor
         return price_array
+    
+    @staticmethod
+    @njit(fastmath = True)
+    def backwards_pass_njit2(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, numba_dict):
+        def _quotient_calc2(price_array, dividend, index, continuation):
+            stock_price_layer = price_array[index]
+            stock_price_layer_zeros = stock_price_layer[stock_price_layer != 0]
+            div_subtract = np.maximum(stock_price_layer_zeros - dividend,0.0)
 
-    def backwards_pass_njit2(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_dict):
+            stock_price_layer_full = np.empty(stock_price_layer_zeros.size + 1)
+            stock_price_layer_full[0] = 0.0
+            stock_price_layer_full[1:] = stock_price_layer_zeros
+
+            quotient_list = np.zeros(shape = stock_price_layer_zeros.size)
+
+            for i in range(0,div_subtract.size):
+                for j in range(0,stock_price_layer_full.size-1):
+                    if div_subtract[i] >= stock_price_layer_full[j] and div_subtract[i] <= stock_price_layer_full[j+1]:
+                        denom = (stock_price_layer_full[j+1] - stock_price_layer_full[j])
+                        if denom != 0.0:
+                            quotient_list[i] = continuation[j]+ (continuation[j+1] - continuation[j])*(div_subtract[i] - stock_price_layer_full[j])/denom
+                        else:
+                            quotient_list[i] = 0
+                        break
+                    
+            return quotient_list
         options_array  = np.zeros((number_of_layers,number_of_layers))
         if call_or_put == True:
             options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
@@ -163,12 +187,16 @@ class binomial_tree_vellekoop():
         for i in range(number_of_layers -2, -1,-1):
 
             continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
-            if i in div_dict.keys():
+            if i in numba_dict:
                 if call_or_put == True:
-                    expnd_continuation = [0.0] + list(continuation)
+                    expnd_continuation = np.empty(continuation.size + 1)
+                    expnd_continuation[0] = 0.0
+                    expnd_continuation[1:] = continuation
                 else:
-                    expnd_continuation = [strike] + list(continuation)
-                ex_div_continuation = self._quotient_calc2(price_array,div_dict[i],i, expnd_continuation)
+                    expnd_continuation = np.empty(continuation.size + 1)
+                    expnd_continuation[0] = strike
+                    expnd_continuation[1:] = continuation
+                ex_div_continuation = _quotient_calc2(price_array,numba_dict[i],i, expnd_continuation)
                 continuation = ex_div_continuation
 
             intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
@@ -177,77 +205,8 @@ class binomial_tree_vellekoop():
         return options_array[0,0]
     
 
-
-    def _quotient_calc2(self, price_array, dividend, index, continuation):
-
-        stock_price_layer = price_array[index]
-        stock_price_layer_zeros = np.array([float(stock_price_layer[i]) for i in range(len(stock_price_layer)) if stock_price_layer[i] != 0])
-        div_subtract = np.maximum(stock_price_layer_zeros - float(dividend),0.0)
-
-        stock_price_layer_full = [0] + stock_price_layer_zeros
-
-        quotient_list = np.zeros(shape = len(stock_price_layer_zeros))
-
-        for i in range(0,len(div_subtract)):
-            for j in range(0,len(stock_price_layer_full)-1):
-                if div_subtract[i] >= stock_price_layer_full[j] and div_subtract[i] <= stock_price_layer_full[j+1]:
-                    try:
-                        quotient_list[i] = continuation[j]+ (continuation[j+1] - continuation[j])*(div_subtract[i] - stock_price_layer_full[j])/(stock_price_layer_full[j+1] \
-                                                                                          - stock_price_layer_full[j])
-                    except Exception as e:
-                        print(e)
-                        quotient_list[i] = 0
-                    break
-                
-        return quotient_list
     
-
-    def backwards_pass_njit(self, price_array,number_of_layers,discount_up,discount_down,strike, call_or_put, div_dict):
-        options_array  = np.zeros((number_of_layers,number_of_layers))
-        if call_or_put == True:
-            options_array[-1,:] = np.maximum(price_array[-1,:] - strike, 0)
-        if call_or_put == False:
-            options_array[-1,:] = np.maximum(strike - price_array[-1,:], 0)
-        for i in range(number_of_layers -2, -1,-1):
-
-            continuation = discount_up*options_array[i+1,1:i+2] + discount_down*options_array[i+1,0:i+1]
-            if i in div_dict.keys():
-                if call_or_put == True:
-                    expnd_continuation = [0.0] + list(continuation)
-                else:
-                    expnd_continuation = [strike] + list(continuation)
-                ex_div_continuation = self._quotient_calc(price_array,div_dict[i],i, expnd_continuation)
-                continuation = ex_div_continuation
-
-            intrinsic = np.maximum(price_array[i,0:i+1] - strike,0) if call_or_put == True else np.maximum(strike - price_array[i,0:i+1],0)
-            options_array[i,0:i+1] = np.maximum(continuation,intrinsic)
-
-        return options_array[0,0]
     
-
-
-    def _quotient_calc(self, price_array, dividend, index, continuation):
-
-        stock_price_layer = price_array[index]
-        stock_price_layer_zeros = np.array([float(stock_price_layer[i]) for i in range(len(stock_price_layer)) if stock_price_layer[i] != 0])
-        div_subtract = np.maximum(stock_price_layer_zeros - float(dividend),0.0)
-
-        stock_price_layer_full = [0] + stock_price_layer_zeros
-
-        quotient_list = np.zeros(shape = len(stock_price_layer_zeros))
-
-        for i in range(0,len(div_subtract)):
-            for j in range(0,len(stock_price_layer_full)-1):
-                if div_subtract[i] >= stock_price_layer_full[j] and div_subtract[i] <= stock_price_layer_full[j+1]:
-                    try:
-                        quotient_list[i] = continuation[j]+ (continuation[j+1] - continuation[j])*(div_subtract[i] - stock_price_layer_full[j])/(stock_price_layer_full[j+1] \
-                                                                                          - stock_price_layer_full[j])
-                    except Exception as e:
-                        print(e)
-                        quotient_list[i] = 0
-                    break
-                
-        return quotient_list
 
 
     
@@ -255,9 +214,6 @@ class binomial_tree_vellekoop():
         numba_dict = Dict.empty(key_type = types.int64, value_type = types.float64)
         for key, value in self.div_dict.items():
             numba_dict[key] = value
-
-        print(numba_dict)
-        print(self.div_dict)
 
         call_or_put = self.call_or_put.lower()
         up_factor, down_factor = self.define_time_segment(sigma)
@@ -276,8 +232,8 @@ class binomial_tree_vellekoop():
         price_array = self.forward_pass_njit(number_of_layers,initial_stock_price,down_factor,up_factor)
 
         
-        return self.backwards_pass_njit(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,
-                                        self.div_dict)
+        return self.backwards_pass_njit2(price_array,number_of_layers,discount_up,discount_down,strike, call_or_put,
+                                        numba_dict)
 
 
         
@@ -425,8 +381,6 @@ def plot_options_surface(ticker, strikes, implied_vols, days_to_exp, stock_price
 
     return [M_grid, LM_grid, IV_grid]
 
-def write_datasample_to_file(data_sample, call_type):
-    return
 
 def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_or_put):
 
