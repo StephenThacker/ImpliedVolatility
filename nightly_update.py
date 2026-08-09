@@ -44,16 +44,18 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
 
     iterate_composite_tickers_dividend_prediction(conn_params)
     
-    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
+    #options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
     print("completed Black Scholes")
-    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Binomial Tree')
+    #options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Binomial Tree')
+    print("completed Binomial Tree") 
+    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Vellekoop')
     print("completed Binomial Tree") 
 
 
 if __name__ == "__main__":
 
     today = dt.datetime.today()
-    start_date = today - timedelta(days=1)
+    start_date = today - timedelta(days=3)
 
 
     nightly_update(start_date, start_date)

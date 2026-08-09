@@ -81,6 +81,22 @@ def read_s_and_p_tickers_from_CSV(conn_params):
 
     return
 
+def add_vel_vol_to_table(conn_params):
+    SQL_QUERY = ''' ALTER TABLE options 
+                    ADD COLUMN vel_imp_vol DOUBLE PRECISION DEFAULT 0 NOT NULL;'''
+    
+    try:
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.execute(SQL_QUERY)
+                conn.commit()
+
+                
+    except Exception as e:
+        print(e)   
+
+    return
+
 
 def add_div_percentage_to_table(conn_params):
     SQL_QUERY = ''' ALTER TABLE stock_data 
@@ -189,6 +205,7 @@ def initalize_options_table(conn_params):
                     midpoint DOUBLE PRECISION,
                     bs_implied_vol DOUBLE PRECISION DEFAULT 0,
                     bin_imp_vol DOUBLE PRECISION DEFAULT 0,
+                    vel_imp_vol DOUBLE PRECISION DEFAULT 0,
 
 
                     PRIMARY KEY (ticker, expiration, price_date, strike, option_type)
@@ -1039,5 +1056,5 @@ if __name__ == "__main__":
     "port": "5432"
     }
     
-    create_future_prediction_data(conn_params)
+    add_vel_vol_to_table(conn_params)
     

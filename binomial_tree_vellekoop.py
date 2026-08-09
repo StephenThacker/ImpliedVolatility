@@ -36,7 +36,7 @@ from implied_vol import binomial_tree_vectorized, thetadata_options_scrape_EOD, 
 class binomial_tree_vellekoop():
 
     def __init__(self, number_of_layers, initial_stock_price, interest_rate,
-                 time_to_expiration, stock_dividend, call_or_put,
+                 time_to_expiration, call_or_put,
                  target_date=None, conn_params = None, ticker = None, last_date = None, expiration_date = None):
         
 
@@ -45,7 +45,6 @@ class binomial_tree_vellekoop():
         self.initial_stock_price = initial_stock_price
         self.time_to_expiration = time_to_expiration
         self.interest_rate = interest_rate
-        self.dividend = stock_dividend
         self.call_or_put = call_or_put
         self.time_to_expiration = self.time_to_expiration/365
         try:
@@ -248,7 +247,7 @@ class binomial_tree_vellekoop():
     
     def calculate_probability(self,u,d):
         try:
-            return (np.exp((self.interest_rate-self.dividend) * self.delta_t) - d) / (u - d)
+            return (np.exp((self.interest_rate) * self.delta_t) - d) / (u - d)
         except ZeroDivisionError:
             raise ValueError("Division by zero in probability calculation (u == d).")
         
@@ -266,13 +265,12 @@ class binomial_tree_vellekoop():
             return np.nan
 
     @classmethod
-    def generate_and_solve_tree_per_expiration(self, conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,  midpoints):
+    def generate_and_solve_tree_per_expiration(self, conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,midpoints,call_or_put):
         call_tree = binomial_tree_vellekoop(number_of_layers=number_of_layers,
                             initial_stock_price=stock_price,
                             interest_rate=interest_rate,
                             time_to_expiration=days_to_exp,
-                            stock_dividend=0,
-                            call_or_put='PUT',
+                            call_or_put=call_or_put,
                             target_date=target_date,
                             conn_params=conn_params,
                             ticker=ticker,
@@ -422,7 +420,7 @@ def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_
         midpoints = current_data['midpoint'].values
 
         IV_call_vals = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
-            ticker, last_date, exp, strikes, midpoints)
+            ticker, last_date, exp, strikes, midpoints, 'PUT')
 
         all_strikes.extend(strikes)
         all_implied_vols.extend(IV_call_vals)
