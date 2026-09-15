@@ -20,7 +20,7 @@ with st.sidebar:
     end_date = col2.date_input("End Date", dt.date(2026, 4, 10))
     
     option_types = st.multiselect("Option Type(s)", ["CALL", "PUT"], default=["PUT"])
-    calc_type = st.selectbox("Calculation Method", ["Binomial Tree", "Black Scholes"])
+    calc_type = st.selectbox("Calculation Method", ["Binomial Tree", "Black Scholes", "Vellekoop"])
     
     low_coef = st.slider("Lower Strike × Spot", 0.5, 1.0, 0.7, 0.05)
     high_coef = st.slider("Upper Strike × Spot", 1.0, 2.0, 1.3, 0.05)

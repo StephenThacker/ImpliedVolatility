@@ -88,8 +88,12 @@ def get_S_and_P_for_date(conn_params: dict[str,str], date: dt.datetime) -> list[
 # gets a list of all tickers that could possibly be in the S&P between two different date ranges
 def get_S_and_P_composite(conn_params, start_date: dt.datetime, end_date: dt.datetime):
 
-    start_date = start_date.date()
-    end_date = end_date.date()
+
+    if isinstance(start_date, dt.datetime):
+        start_date = start_date.date()
+
+    if isinstance(end_date, dt.datetime):
+        end_date = end_date.date()
 
     sql_master_query = '''SELECT date, s_and_p__master FROM market_data WHERE s_and_p__master IS NOT NULL ORDER BY date DESC LIMIT 1'''
 

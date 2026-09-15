@@ -7,6 +7,7 @@ import datetime as dt
 from datetime import timedelta
 from polygonio_scrape import pull_div_data_poly_for_all
 from future_dividend_predictions import iterate_composite_tickers_dividend_prediction
+from binomial_tree_vellekoop import iterate_composite_Vellekoop_tickers
 
 load_dotenv()
 
@@ -22,7 +23,7 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
         "password": os.getenv("DB_PASSWORD"),
         "port": "5432"}
 
-
+    
     options_scrape = thetadata_options_scrape_EOD()
     store_S_and_P_changes(conn_params)
     store_nightly_interest_rate(conn_params)
@@ -44,18 +45,20 @@ def nightly_update(start_date:dt.datetime, end_date:dt.datetime, conn_params = N
 
     iterate_composite_tickers_dividend_prediction(conn_params)
     
-    #options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
+    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Black Scholes')
     print("completed Black Scholes")
-    #options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Binomial Tree')
+    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Binomial Tree')
     print("completed Binomial Tree") 
-    options_scrape.build_options_surface_entire_S_and_P(conn_params, start_date, end_date, 'Vellekoop')
+    # Need to replace this here with something else
+    velle_start_date = start_date.date()
+    iterate_composite_Vellekoop_tickers(conn_params, velle_start_date, 'PUT')
     print("completed Binomial Tree") 
 
 
 if __name__ == "__main__":
 
     today = dt.datetime.today()
-    start_date = today - timedelta(days=3)
+    start_date = today - timedelta(days=1)
 
 
     nightly_update(start_date, start_date)

@@ -22,8 +22,8 @@ if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
 
 REAL_DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-START_DATE = date(2026, 5, 18)
-END_DATE   = date(2026, 5, 18)
+START_DATE = date(2026, 9, 8)
+END_DATE   = date(2026, 9, 8)
 
 def create_schema(conn_params: dict[str,str]):
     with psycopg2.connect(**conn_params) as conn:
@@ -57,6 +57,7 @@ def create_schema(conn_params: dict[str,str]):
                     midpoint DOUBLE PRECISION,
                     bs_implied_vol DOUBLE PRECISION DEFAULT 0,
                     bin_imp_vol DOUBLE PRECISION DEFAULT 0,
+                    vel_imp_vol DOUBLE PRECISION DEFAULT 0,
 
 
                     PRIMARY KEY (ticker, expiration, price_date, strike, option_type)

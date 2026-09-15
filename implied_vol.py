@@ -32,7 +32,7 @@ load_dotenv()
 class binomial_tree_vellekoop():
 
     def __init__(self, number_of_layers, initial_stock_price, interest_rate,
-                 time_to_expiration, stock_dividend, call_or_put,
+                 time_to_expiration, call_or_put,
                  target_date=None, conn_params = None, ticker = None, last_date = None, expiration_date = None):
         
 
@@ -267,7 +267,6 @@ class binomial_tree_vellekoop():
                             initial_stock_price=stock_price,
                             interest_rate=interest_rate,
                             time_to_expiration=days_to_exp,
-                            stock_dividend=0,
                             call_or_put=call_or_put,
                             target_date=target_date,
                             conn_params=conn_params,
@@ -571,7 +570,9 @@ class thetadata_options_scrape_EOD:
     
     def build_options_surface_from_database_refactored(self, conn_params, ticker:str, target_date:dt.datetime.date, calculation_type:str):
         #selects expirations that currently exist in the database, for a specific target
+        self.conn_params = conn_params
         expirations_list = self.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
+        print("expirations list", expirations_list)
 
         if calculation_type == 'Vellekoop':
             last_date = expirations_list[-1]
@@ -580,6 +581,7 @@ class thetadata_options_scrape_EOD:
 
         for expiration_date in expirations_list:
             options_dataframe = self.pulling_all_options_data_for_pricing(conn_params, ticker, target_date, expiration_date)
+            print(options_dataframe.head())
             options_dataframe = self.calculate_iv_surface_refactored(calculation_type, options_dataframe, ticker= ticker,\
                                                                       last_date= last_date, exp_date= expiration_date, target_date = target_date)
             options_dataframe = self.filter_iv_data(options_dataframe, -5, 15)
@@ -613,13 +615,13 @@ class thetadata_options_scrape_EOD:
             call_midpoints = options_dataframe.loc[is_call, 'midpoint'].values
             put_strikes = options_dataframe.loc[is_put, 'strike'].values
             put_midpoints = options_dataframe.loc[is_put, 'midpoint'].values
-            options_dataframe.loc[is_call, 'implied_vol'] = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(self.conn_params, number_of_layers,stock_price,interest_rate,\
+            options_dataframe.loc[is_call, 'implied_vol'] = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(self.conn_params,stock_price,interest_rate,\
                                                                            days_to_expiration,ticker,last_date,exp_date,call_strikes,\
-                                                                               call_midpoints,'CALL',target_date)
+                                                                               call_midpoints,'CALL',target_date, number_of_layers= 500)
             
             options_dataframe.loc[is_put, 'implied_vol'] = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(self.conn_params, number_of_layers,stock_price,interest_rate,\
                                                                            days_to_expiration,ticker,last_date,exp_date,put_strikes,\
-                                                                               put_midpoints,'PUT', target_date)
+                                                                               put_midpoints,'PUT', target_date , number_of_layers= 500)
             
             pass
 
@@ -684,7 +686,7 @@ class thetadata_options_scrape_EOD:
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (ticker, expiration, price_date, strike, option_type)
                         DO UPDATE SET
-                        bin_imp_vol = EXCLUDED.vel_imp_vol'''
+                        vel_imp_vol = EXCLUDED.vel_imp_vol'''
             
         columns = ['ticker', 'expiration', 'price_date', 'strike', 'option_type', 'implied_vol']
 
@@ -857,6 +859,13 @@ class thetadata_options_scrape_EOD:
             
         if calculation_type == "Binomial Tree":
             sql_query = '''SELECT expiration, strike, bid, ask, volume, bin_imp_vol AS implied_volatility
+                        FROM options WHERE price_date = %s 
+                        AND ticker = %s
+                        AND option_type = %s'''
+
+
+        if calculation_type == "Vellekoop":
+            sql_query = '''SELECT expiration, strike, bid, ask, volume, vel_imp_vol AS implied_volatility
                         FROM options WHERE price_date = %s 
                         AND ticker = %s
                         AND option_type = %s'''
@@ -1152,11 +1161,12 @@ def main():
     thetadata_test = thetadata_options_scrape_EOD()
 
     
-    end_date = dt.datetime(2026, 5, 18)
-    start_date = dt.datetime(2026, 5, 18)
-    thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
+    end_date = dt.datetime(2026, 5, 18).date()
+    start_date = dt.datetime(2026, 5, 18).date()
+    #thetadata_test.scrape_options_data_theta_data_S_and_P(start_date, end_date, conn_params)
 
-    thetadata_test.scrape_stock_data_theta_data_S_and_P(start_date,end_date,conn_params)
+    #thetadata_test.scrape_stock_data_theta_data_S_and_P(start_date,end_date,conn_params)
+    thetadata_test.build_options_surface_from_database_refactored(conn_params,'CVX',start_date, 'Vellekoop')
     #thetadata_test.build_options_surfaces_within_date_range(conn_params, 'FIG', start_date, end_date, 'Binomial Tree')
     #end_time = time.perf_counter()
     #print("final time: ", end_time- start_time)

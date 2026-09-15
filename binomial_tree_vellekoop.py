@@ -25,11 +25,11 @@ from utils import get_S_and_P_composite
 import asyncio
 from collections.abc import Iterator
 import plotly
-from tests import conftests
+#from tests import conftests
 import implied_vol
-from testcontainers.postgres import PostgresContainer
-from data_helpers.ephemeral_db import start_test_db
-from implied_vol import binomial_tree_vectorized, thetadata_options_scrape_EOD, calculate_dates
+#from testcontainers.postgres import PostgresContainer
+#from data_helpers.ephemeral_db import start_test_db
+from implied_vol import thetadata_options_scrape_EOD, calculate_dates
 
 
 
@@ -265,7 +265,7 @@ class binomial_tree_vellekoop():
             return np.nan
 
     @classmethod
-    def generate_and_solve_tree_per_expiration(self, conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,midpoints,call_or_put):
+    def generate_and_solve_tree_per_expiration(self, conn_params,number_of_layers, stock_price,interest_rate,days_to_exp,ticker, last_date,exp_date ,strikes,midpoints,call_or_put, target_date):
         call_tree = binomial_tree_vellekoop(number_of_layers=number_of_layers,
                             initial_stock_price=stock_price,
                             interest_rate=interest_rate,
@@ -400,17 +400,21 @@ def plot_options_surface(ticker, strikes, implied_vols, days_to_exp, stock_price
     return [M_grid, LM_grid, IV_grid]
 
 
-def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_or_put):
+def plot_data_for_group(theta_data_object, conn_params, ticker, target_date, expiration_list, call_or_put, plot_data = True):
 
     all_strikes = []
     all_implied_vols = []
     all_days_to_exp = []
     latest_stock_price = None
+    all_expirations = []
+    all_tickers = []
+    all_dates = []
+    all_options = [] 
 
     last_date = expiration_list[-1]
 
     for exp in expiration_list:
-        current_data = get_data_per_expiration(conn_params,ticker, target_date, exp, call_or_put)
+        current_data = get_data_per_expiration(theta_data_object, conn_params,ticker, target_date, exp, call_or_put)
 
         stock_price = current_data['stock_price'].iloc[-1]
         latest_stock_price = stock_price
@@ -420,20 +424,32 @@ def plot_data_for_group(conn_params, ticker, target_date, expiration_list, call_
         midpoints = current_data['midpoint'].values
 
         IV_call_vals = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
-            ticker, last_date, exp, strikes, midpoints, 'PUT')
+            ticker, last_date, exp, strikes, midpoints, 'PUT', target_date)
 
         all_strikes.extend(strikes)
         all_implied_vols.extend(IV_call_vals)
         all_days_to_exp.extend([days_to_exp] * len(strikes))
-
-    if len(all_strikes) > 0 and latest_stock_price is not None:
-        plot_options_surface(ticker, all_strikes,all_implied_vols, all_days_to_exp,latest_stock_price,interp_method='linear')
-
-    return
-
+        all_expirations.extend([exp]*len(strikes))
+        all_tickers.extend([ticker]*len(strikes))
+        all_dates.extend([target_date]*len(strikes))
+        all_options.extend([call_or_put]*len(strikes))
 
 
-def get_data_per_expiration(conn_params, ticker, target_date,expiration, call_or_put:str):
+    if plot_data ==True:
+        if len(all_strikes) > 0 and latest_stock_price is not None:
+            plot_options_surface(ticker, all_strikes,all_implied_vols, all_days_to_exp,latest_stock_price,interp_method='linear')
+
+    all_strikes = [float(x) for x in all_strikes]
+    all_implied_vols = [float(x) for x in all_implied_vols]
+
+    tuple_generator = zip(all_tickers, all_expirations, all_dates, all_strikes, all_options, all_implied_vols)
+
+
+    return tuple_generator
+
+
+
+def get_data_per_expiration(theta_data_object, conn_params, ticker, target_date,expiration, call_or_put:str):
 
     data_sample = theta_data_object.pulling_all_options_data_for_pricing(conn_params, ticker, target_date,expiration)
 
@@ -448,13 +464,13 @@ def get_data_per_expiration(conn_params, ticker, target_date,expiration, call_or
     return filtered_data
 
 
-if __name__ == "__main__":
-    postgres = None
-    try:
-        conn_params, postgres = start_test_db()
+def test_binomial_tree(ticker = 'CVX', target_date = date(2026,9,8)):
 
+    postgres = None
+    try:    
+        conn_params, postgres = start_test_db()
         ticker = 'CVX'
-        target_date = date(2026, 5, 18)
+        target_date = date(2026, 9, 8)
 
         theta_data_object = thetadata_options_scrape_EOD()
 
@@ -462,9 +478,65 @@ if __name__ == "__main__":
         expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
 
 
-        plot_data_for_group(conn_params, ticker, target_date, expirations_list, 'PUT')
-
-
+        plot_data_for_group(theta_data_object, conn_params, ticker, target_date, expirations_list, 'PUT')
     finally:
         if postgres is not None:
             postgres.stop()
+
+def build_surface_vellekoop_prod(conn_params, ticker , target_date, option_type):
+    try:
+
+        theta_data_object = thetadata_options_scrape_EOD()
+
+        expirations_list = theta_data_object.select_available_expiration_dates_for_ticker(conn_params, ticker, target_date)
+
+        tuple_generator = plot_data_for_group(theta_data_object, conn_params, ticker, target_date, expirations_list, option_type,False)
+
+
+        stream_vellekoop_surface_into_db(conn_params, tuple_generator)
+    except Exception as e:
+        print(e)
+        return 
+
+    return
+
+
+def stream_vellekoop_surface_into_db(conn_params, tuple_generator):
+
+    insert_sql = '''INSERT into options (ticker, expiration, price_date, strike, option_type, vel_imp_vol)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (ticker, expiration, price_date, strike, option_type) DO UPDATE SET
+                    vel_imp_vol = EXCLUDED.vel_imp_vol'''
+
+    try: 
+        with psycopg2.connect(**conn_params) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(insert_sql, tuple_generator)
+
+    except Exception as e:
+        print(e)
+
+
+
+    return
+
+def iterate_composite_Vellekoop_tickers(conn_params, date, option_type = 'PUT'):
+
+    tickers = get_S_and_P_composite(conn_params, start_date=date, end_date = date)
+
+    for ticker in tickers:
+        build_surface_vellekoop_prod(conn_params, ticker, date, option_type)
+    return
+
+
+
+if __name__ == "__main__":
+    conn_params = {
+        "host": "localhost",
+        "database": os.getenv("DB_NAME"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "port": "5432"
+    }
+    #test_binomial_tree()
+    build_surface_vellekoop_prod(conn_params, 'CVX', date(2026,9,8) )
