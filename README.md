@@ -59,7 +59,13 @@ $$
 \sigma_{n+1} = \sigma_{n} - \frac{BS(\sigma_{n}) - C_{Market}}{V(\sigma_{n})}
 $$
 
-until a local minimum is reached , where $BS(\sigma_{n})$ is the Black-Scholes estimation of the option price, $C_{Market}$ is the option market price and $V(\sigma_{n})$ is the point value of Vega for $\sigma_{n}$. For $\sigma_{1}$, I used a hard-coded value of 0.5. 
+until a local minimum is reached , where $BS(\sigma_{n})$ is the Black-Scholes estimation of the option price, $C_{Market}$ is the option market price and $V(\sigma_{n})$ is the point value of Vega for $\sigma_{n}$. For $\sigma_{1}$, I used a hard-coded value between 0 and 1.
+
+<p align="center">
+  <img width="404" height="329" alt="MicronImpliedvol" src="https://github.com/user-attachments/assets/337e5395-581d-4926-85f9-3f0821df1084" />
+</p>
+
+<h6 align="center">MU Surface Put Option 9-16-2026: Black-Scholes Showing Exaggerated Call Skew</h6>
 
 For American options, this method seems works reasonably well as an approximation for close-to-the-money options, but comes up short on out-of-the money options and options with dividends. As this method relates to European Options, it does not account for the early exercise premium, resulting in a upwards bias in the implied volatility surface.
 
@@ -125,6 +131,12 @@ that maps $\sigma$ to the value of an option.
 
 By building and solving these trees extremely quickly, we are able to optimize this function and solve for $\sigma$ and that gives us the implied volatility of an American option. 
 
+<p align="center">
+  <img width="436" height="455" alt="MUImpliedVolBinomial9152026" src="https://github.com/user-attachments/assets/e2e891db-c329-45ce-843c-a75de3081915" />
+</p>
+
+<h6 align="center">MU Surface Put Option 9-16-2026: Binomial Tree</h6>
+
 ## Vellekoop Dividend Correction
 Another factor that affects the pricing of options contracts are dividend distributions. Dividend distributions greatly complicate the valuation of options contracts and can create scenarios which change the optimal time to execute a contract, and therefore, change the correct valuation of that options contract. As a result, deriving the implied volatility from an options contract is also complicated. 
 
@@ -156,32 +168,55 @@ So, to summarize: For a fixed node $(i,j)$, we calculate the valuation $`C^{Int}
 
 Calculating valuations in this way, we are able to adjust for dividends. 
 
+<div align="center">
+
+<img width="502" height="542" alt="ImpliedVolVellekoop" src="https://github.com/user-attachments/assets/4427e188-5704-465b-9c82-4208adb27c5e" />
+
+*Vellekoop Dividend Adjustment CVX*
+
+</div>
+
+
 However, implied volatility surfaces are forward looking. As a result, ex-dividend dates, expected dividend values are not available for the entire options chain. In this algorithm, I used future dividend data when it existed. For future dividends that have not been announced yet, I used the most recently announced dividend value for the rest of the options chain, assuming ex-dividend dates on a periodic 91 day schedule. 
 
 I did not make any special adjustments for stocks with irregular dividends, such as special dividends or dividends that are dispersed on a non-quarterly schedule (i.e., 2 times a year, 3 times a year). As a result, this dividend adjustment is not adapted for the small fraction of S&P 500 stocks in this category.
 
 ## Features
-You can enter in a ticker for S&P 500 stocks and generate an implied volatility surface for call or put options. You can also scroll through the dates, to see how the options surfaces are changing for a single ticker over timer. You can see how the three different models solve the surface and try different forms of interpolation as well. You can display surfaces for the Black-Scholes solver, the Binomial-Tree solver and the Vellekoop Dividend Correction.
+You can enter in a ticker for S&P 500 stocks and generate an implied volatility surface for call or put options for end-of-day data. The database updates nightly, pulling the data from various APIs and calculating the implied volatility surfaces with the Black-Scholes, Binomial Tree, and Vellekoop Dividend models. For a given ticker, you can  scroll through the dates, to see how the options surfaces are changing for a single ticker over timer.
+
+<p align="center">
+  <img width="1201" height="508" alt="DateAnimation" src="https://github.com/user-attachments/assets/688146c3-4e9b-40a6-bd51-777c362a85c1" />
+</p>
+
+<h6 align="center">Implied Volatility Engine UI</h6>
 
 ## Architecture and Data Sources
-For all parts of my project, I am only calculating implied volatility surfaces for end-of-day data. For my options and stock data, I used ThetaData's API. To track changes to the list of tickers in the S&P 500, I am scraping Wikipedia. I am getting SOFR interest rate data from the Federal Reserve Bank of New York's website. 
+To get the options, stock and dividend data, I scraped a variety of free APIs and websites. I've included a list of the architecture and data sources that I used below. 
 
-For my architecture, I used PostGreSQL and Docker to host and containerize the database. For scheduling, I used "Supercronic", which is an opensource containerized version of Linux's Cronjob to work in Docker. 
+Database: PostGreSQL, UI: Streamlit & Plotly, Dividend Data: Massive API, Stock & Options Chain Data: ThetaData API, Computations: Numba, Interest Rate Data: Federal Reserve Bank of New York's Website, S&P 500 Ticker Changes: Wikipedia
 
-For dividend data, I used Massive's free API. 
+<p align="center">
+  <img width="564" height="309" alt="Overview" src="https://github.com/user-attachments/assets/c18de006-28f3-4bed-a8d3-21e195fdb3bd" />
+  <br />
+  <em>Architecture Overview</em>
+</p>
 
-For the heavy computations, I used Numba, a Python-to-Machine Code wrapper. 
 
-For the UI, I used Streamlit and Plotly.
+
+<p align="center">
+  <img width="935" height="494" alt="PostGresSQK" src="https://github.com/user-attachments/assets/87973c82-fc47-4143-a32c-301a02ba7266" />
+</p>
+
+<h6 align="center">PostGreSQL Database</h6>
 
 ## Limitations, Challenges and Future Interest
 There are several major limitations and potential areas for improvement with this project. The main limitation of this project is it's inability to fully capture the implied volatility curve of deep out-of-the-money and deep in-the-money options contracts. These contracts are difficult to solve because of limited liquidity. To deal with this problem, modern industry implied volatility engines (such as Vola Dynamics) solve volatility curves parametrically, fitting one single curve across an entire range of strike prices per expiration date. This allows for pricing of the entire curve, simultaneously, better capturing the shape and skew of the curve.
 
 On the other hand, solving entire CRR trees is computationally intensive and cannot be done quickly. To the best of my knowledge, modern systems use a technique called "Deamericanization", where an American Option is transformed into a European Option and the options contract is solved parametrically using a Black-Scholes solver. This allows for faster processing of Implied Volatility surfaces, which are typically processed in real-time. 
 
-This is something that I am potentially interested in working on in a future project. 
+There are other limitations too. This engine does not adjust for stock splits, future dividend growth rates are not modeled into the future dividend distributions. 
 
-There are other limitations too. This engine does not adjust for stock splits, which affects implied volatility surfaces, future dividend growth rates are not modeled into the future dividend distributions. 
+Other areas for improvement include adding quality assurance against a professional data set and removing arbitrage/no arbitrage on the surface.
 
 ## References
 
