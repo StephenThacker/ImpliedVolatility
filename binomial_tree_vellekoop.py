@@ -424,7 +424,7 @@ def plot_data_for_group(theta_data_object, conn_params, ticker, target_date, exp
         midpoints = current_data['midpoint'].values
 
         IV_call_vals = binomial_tree_vellekoop.generate_and_solve_tree_per_expiration(conn_params, 500, stock_price, interest_rate, days_to_exp, 
-            ticker, last_date, exp, strikes, midpoints, 'PUT', target_date)
+            ticker, last_date, exp, strikes, midpoints, call_or_put, target_date)
 
         all_strikes.extend(strikes)
         all_implied_vols.extend(IV_call_vals)
