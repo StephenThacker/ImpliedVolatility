@@ -218,9 +218,9 @@ There are several major limitations and potential areas for improvement with thi
 
 On the other hand, solving entire CRR trees is computationally intensive and cannot be done quickly. To the best of my knowledge, modern systems use a technique called "Deamericanization", where an American Option is transformed into a European Option and the options contract is solved parametrically using a Black-Scholes solver. This allows for faster processing of Implied Volatility surfaces, which are typically processed in real-time. 
 
-There are other limitations too. This engine does not adjust for stock splits, future dividend growth rates are not modeled into the future dividend distributions. 
+The second major area for improvement is with quality assurance. I do not yet have access to a professional grade dataset for testing my surfaces against.
 
-Other areas for improvement include adding quality assurance against a professional data set and removing arbitrage/no arbitrage on the surface.
+Other areas for improvement include removing arbitrage/no arbitrage on the surface, adjusting for stock splits, and future dividend growth rates for dividend adjustments.
 
 ## References
 
